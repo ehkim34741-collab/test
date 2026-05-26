@@ -6,6 +6,7 @@ import Tasks from './pages/Tasks';
 import Resources from './pages/Resources';
 import Risks from './pages/Risks';
 import Reports from './pages/Reports';
+import Requirements from './pages/Requirements';
 
 export default function App() {
   return (
@@ -18,6 +19,7 @@ export default function App() {
           <Route path="resources" element={<Resources />} />
           <Route path="risks" element={<Risks />} />
           <Route path="reports" element={<Reports />} />
+          <Route path="requirements" element={<Requirements />} />
         </Route>
       </Routes>
     </BrowserRouter>
