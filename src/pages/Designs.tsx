@@ -5,7 +5,7 @@ import {
   Plus, Search, Upload, Download, X, ChevronDown, ChevronUp,
   FileText, Monitor, Database, CheckCircle, AlertCircle,
   History, Eye, FolderOpen, FileDown, FileSpreadsheet,
-  ClipboardCheck, ThumbsUp, ThumbsDown, List,
+  ClipboardCheck, ThumbsUp, ThumbsDown, List, Table2,
 } from 'lucide-react';
 import { designs as initialDesigns } from '../data/designData';
 import { projects } from '../data/mockData';
@@ -52,6 +52,7 @@ interface FolderConnection {
   folderPath: string;
   scannedAt: string;
   files: { name: string; size: string }[];
+  importedFiles: string[]; // 이미 가져온 파일 추적
 }
 
 interface ReviewRecord {
@@ -79,17 +80,17 @@ function nowStr() {
 
 function detectDesignType(fileName: string): DesignType {
   const lower = fileName.toLowerCase();
-  if (lower.includes('ui') || lower.includes('화면') || lower.includes('screen')) return '화면 설계서';
-  if (lower.includes('db') || lower.includes('database') || lower.includes('데이터')) return '데이터베이스 설계서';
+  if (/ui|ux|화면|screen|wireframe|prototype|mockup|레이아웃|layout|메뉴|menu/.test(lower)) return '화면 설계서';
+  if (/db|database|데이터베이스|데이터|erd|schema|테이블|table|sql|ddl|dml/.test(lower)) return '데이터베이스 설계서';
   return '요구사항 정의서';
 }
 
 function extractNameFromFile(fileName: string): string {
   return fileName
-    .replace(/\.[^.]+$/, '')              // 확장자 제거
-    .replace(/_?v\d+[\._]\d+[^\s]*$/i, '') // 버전 접미사 제거 (_v1.0, _v1.1 등)
-    .replace(/[_-]/g, ' ')                 // 언더스코어/하이픈 → 공백
-    .replace(/\s+/g, ' ')                  // 연속 공백 정리
+    .replace(/\.[^.]+$/, '')
+    .replace(/_?v\d+[\._]\d+[^\s]*$/i, '')
+    .replace(/[_-]/g, ' ')
+    .replace(/\s+/g, ' ')
     .trim();
 }
 
@@ -102,9 +103,86 @@ function emptyForm(): Omit<Design, 'id' | 'versions' | 'createdAt' | 'updatedAt'
   };
 }
 
-// 파일 미리보기 컴포넌트
+// ────────────── 엑셀 뷰어 ──────────────
+function ExcelViewer({ fileData }: { fileData: string }) {
+  const [sheets, setSheets] = useState<{ name: string; data: unknown[][] }[]>([]);
+  const [activeSheet, setActiveSheet] = useState(0);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    try {
+      const base64 = fileData.split(',')[1];
+      const binary = atob(base64);
+      const bytes = new Uint8Array(binary.length);
+      for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+      const wb = XLSX.read(bytes, { type: 'array' });
+      setSheets(wb.SheetNames.map(name => ({
+        name,
+        data: XLSX.utils.sheet_to_json(wb.Sheets[name], { header: 1, defval: '' }) as unknown[][],
+      })));
+    } catch { setSheets([]); }
+    setLoading(false);
+  }, [fileData]);
+
+  if (loading) return (
+    <div className="flex items-center justify-center h-full text-gray-400 text-sm">파일 로딩 중...</div>
+  );
+  if (sheets.length === 0) return (
+    <div className="flex items-center justify-center h-full text-red-400 text-sm">파일을 읽을 수 없습니다.</div>
+  );
+
+  const currentData = sheets[activeSheet]?.data ?? [];
+  const maxCols = Math.max(...currentData.map(r => (r as unknown[]).length), 0);
+
+  return (
+    <div className="flex flex-col h-full bg-white rounded-xl border border-gray-200 overflow-hidden">
+      {/* 시트 탭 */}
+      <div className="flex items-center gap-0.5 px-2 py-1.5 border-b border-gray-200 bg-gray-50 flex-shrink-0 overflow-x-auto">
+        <Table2 size={13} className="text-green-600 mr-1 flex-shrink-0" />
+        {sheets.map((s, i) => (
+          <button key={i} onClick={() => setActiveSheet(i)}
+            className={`px-3 py-1 text-xs rounded font-medium transition-colors flex-shrink-0 ${
+              i === activeSheet ? 'bg-green-600 text-white' : 'text-gray-600 hover:bg-gray-200'
+            }`}>
+            {s.name}
+          </button>
+        ))}
+        <span className="ml-auto text-xs text-gray-400 flex-shrink-0 pr-1">{currentData.length}행</span>
+      </div>
+      {/* 테이블 */}
+      <div className="flex-1 overflow-auto">
+        <table className="border-collapse text-xs">
+          <tbody>
+            {currentData.slice(0, 500).map((row, ri) => (
+              <tr key={ri} className={ri === 0 ? 'sticky top-0 z-10' : ''}>
+                <td className={`border border-gray-200 px-1.5 py-1 text-center w-8 select-none text-gray-300 ${ri === 0 ? 'bg-green-50' : ri % 2 === 0 ? 'bg-gray-50' : 'bg-white'}`}>
+                  {ri + 1}
+                </td>
+                {Array.from({ length: maxCols }, (_, ci) => (
+                  <td key={ci}
+                    className={`border border-gray-200 px-2 py-1 whitespace-nowrap max-w-[180px] truncate ${
+                      ri === 0 ? 'bg-green-50 font-semibold text-gray-700' : ri % 2 === 0 ? 'bg-gray-50 text-gray-700' : 'bg-white text-gray-700'
+                    }`}
+                    title={String((row as unknown[])[ci] ?? '')}>
+                    {String((row as unknown[])[ci] ?? '')}
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        {currentData.length > 500 && (
+          <div className="text-center text-xs text-gray-400 py-2 border-t border-gray-100">
+            500행까지 표시 (전체 {currentData.length}행)
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ────────────── 파일 미리보기 ──────────────
 function FilePreview({ design, ver }: { design: Design; ver?: DesignVersion }) {
-  // fileData가 있으면 파일 렌더링, 없으면 산출물 상세 정보 표시
   if (!ver?.fileData) {
     const ext = ver?.fileName.split('.').pop()?.toLowerCase();
     const iconColor = ext === 'xlsx' || ext === 'xls' ? 'text-green-500'
@@ -113,18 +191,16 @@ function FilePreview({ design, ver }: { design: Design; ver?: DesignVersion }) {
 
     return (
       <div className="h-full overflow-y-auto space-y-4">
-        {/* 산출물 헤더 */}
         <div className="bg-gradient-to-br from-slate-50 to-blue-50 rounded-xl p-6">
           <div className="flex items-center gap-2 mb-2 flex-wrap">
             <span className="text-xs bg-white border border-gray-200 text-gray-600 px-2.5 py-0.5 rounded-full font-medium">{design.type}</span>
             <span className={`text-xs px-2.5 py-0.5 rounded-full font-medium ${STATUS_STYLE[design.status]}`}>{design.status}</span>
-            <span className={`text-xs px-2.5 py-0.5 rounded-full font-medium ${CR_STYLE[design.customerReviewStatus]}`}>고객검토: {design.customerReviewStatus}</span>
+            <span className={`text-xs px-2.5 py-0.5 rounded-full font-medium ${CR_STYLE[design.customerReviewStatus]}`}>고객: {design.customerReviewStatus}</span>
           </div>
           <h2 className="text-xl font-bold text-gray-900 mt-3 mb-1">{design.name}</h2>
           <p className="text-sm text-gray-500">{design.projectName} · {design.phase}단계</p>
         </div>
 
-        {/* 상세 정보 그리드 */}
         <div className="grid grid-cols-2 gap-3">
           {[
             { label: '담당자', value: design.manager || '—' },
@@ -139,7 +215,6 @@ function FilePreview({ design, ver }: { design: Design; ver?: DesignVersion }) {
           ))}
         </div>
 
-        {/* 관련 요구사항 */}
         {design.relatedRequirementIds.length > 0 && (
           <div className="bg-white rounded-xl border border-gray-100 p-4">
             <div className="text-xs font-semibold text-gray-500 mb-2">관련 요구사항</div>
@@ -151,7 +226,6 @@ function FilePreview({ design, ver }: { design: Design; ver?: DesignVersion }) {
           </div>
         )}
 
-        {/* 버전 이력 */}
         <div className="bg-white rounded-xl border border-gray-100 p-4">
           <div className="text-xs font-semibold text-gray-500 mb-3">버전 이력 ({design.versions.length}건)</div>
           {design.versions.length === 0 ? (
@@ -188,12 +262,14 @@ function FilePreview({ design, ver }: { design: Design; ver?: DesignVersion }) {
     );
   }
 
-  // fileData 있을 때 — 파일 종류별 렌더링
   const mimeType = ver.fileData.split(';')[0].replace('data:', '');
+  const ext = ver.fileName.split('.').pop()?.toLowerCase();
 
+  // PDF → 인라인 뷰어
   if (mimeType === 'application/pdf') {
     return <iframe src={ver.fileData} className="w-full h-full rounded-lg border border-gray-200" title={ver.fileName} />;
   }
+  // 이미지 → 직접 표시
   if (mimeType.startsWith('image/')) {
     return (
       <div className="flex items-center justify-center h-full bg-gray-50 rounded-lg border border-gray-200">
@@ -201,18 +277,22 @@ function FilePreview({ design, ver }: { design: Design; ver?: DesignVersion }) {
       </div>
     );
   }
+  // Excel / CSV → XLSX 라이브러리로 테이블 렌더링
+  if (ext === 'xlsx' || ext === 'xls' || ext === 'csv') {
+    return <ExcelViewer fileData={ver.fileData} />;
+  }
 
-  const ext = ver.fileName.split('.').pop()?.toLowerCase();
-  const iconColor = ext === 'xlsx' || ext === 'xls' ? 'text-green-500'
-    : ext === 'pptx' || ext === 'ppt' ? 'text-orange-500'
+  // PPT / Word 등 — 다운로드 안내
+  const iconColor = ext === 'pptx' || ext === 'ppt' ? 'text-orange-500'
     : ext === 'docx' || ext === 'doc' ? 'text-blue-500' : 'text-gray-400';
-
   return (
     <div className="flex flex-col items-center justify-center h-full bg-gray-50 rounded-xl border border-gray-200">
       <FileText size={56} className={`${iconColor} mb-4`} />
       <p className="text-sm font-semibold text-gray-700 mb-1">{ver.fileName}</p>
-      <p className="text-xs text-gray-400 mb-6">{ver.fileSize} · {ver.version} · {ver.uploadedAt}</p>
-      <p className="text-xs text-gray-400 mb-4 text-center px-8">Office 파일은 브라우저 미리보기가 지원되지 않습니다.</p>
+      <p className="text-xs text-gray-400 mb-2">{ver.fileSize} · {ver.version} · {ver.uploadedAt}</p>
+      <p className="text-xs text-amber-600 bg-amber-50 rounded-lg px-3 py-2 mb-5 text-center">
+        PowerPoint · Word 파일은 브라우저 보안 정책으로 인해<br />인라인 미리보기가 지원되지 않습니다.
+      </p>
       <a href={ver.fileData} download={ver.fileName}
         className="flex items-center gap-2 bg-blue-600 text-white text-sm px-5 py-2.5 rounded-xl hover:bg-blue-700 transition-colors font-medium">
         <Download size={15} />파일 다운로드
@@ -224,6 +304,7 @@ function FilePreview({ design, ver }: { design: Design; ver?: DesignVersion }) {
 // ────────────── 메인 컴포넌트 ──────────────
 export default function Designs() {
   const [data, setData] = useState<Design[]>(initialDesigns);
+  const [autoImportNotice, setAutoImportNotice] = useState('');
 
   // 필터
   const [search, setSearch] = useState('');
@@ -241,17 +322,17 @@ export default function Designs() {
   const [pendingFile, setPendingFile] = useState<{ name: string; size: string; data: string } | null>(null);
   const [fileNote, setFileNote] = useState('');
 
-  // ── 파일 뷰어 + 검토 ──
+  // 뷰어
   const [viewerTarget, setViewerTarget] = useState<Design | null>(null);
   const [viewerVersion, setViewerVersion] = useState<DesignVersion | undefined>(undefined);
 
-  // ── 승인/반려 모달 ──
+  // 승인/반려
   const [approvalTarget, setApprovalTarget] = useState<Design | null>(null);
   const [approvalAction, setApprovalAction] = useState<'승인' | '반려' | null>(null);
   const [approvalReviewer, setApprovalReviewer] = useState('');
   const [approvalReason, setApprovalReason] = useState('');
 
-  // ── 검토 이력 ──
+  // 검토이력
   const [reviewLog, setReviewLog] = useState<ReviewRecord[]>([]);
   const [showReviewLog, setShowReviewLog] = useState(false);
 
@@ -271,12 +352,61 @@ export default function Designs() {
   const [fcSelected, setFcSelected] = useState<Set<string>>(new Set());
   const folderRef = useRef<HTMLInputElement>(null);
 
-  // localStorage 로드
+  // ── 앱 시작 시 localStorage 로드 + 폴더 연결 자동 매핑 ──
   useEffect(() => {
-    const fc = localStorage.getItem('design-folder-connections');
-    if (fc) { try { setFolderConnections(JSON.parse(fc)); } catch {} }
+    const now = today();
+
+    // 검토이력
     const rl = localStorage.getItem('design-review-log');
     if (rl) { try { setReviewLog(JSON.parse(rl)); } catch {} }
+
+    // 폴더 연결 로드 + 자동 가져오기
+    const fc = localStorage.getItem('design-folder-connections');
+    if (!fc) return;
+    try {
+      const conns: FolderConnection[] = JSON.parse(fc);
+      let autoItems: Design[] = [];
+      let baseIdx = initialDesigns.length;
+
+      const updatedConns = conns.map(conn => {
+        const imported = conn.importedFiles ?? [];
+        const newFiles = conn.files.filter(f => !imported.includes(f.name));
+        if (newFiles.length === 0) return conn;
+
+        newFiles.forEach(file => {
+          autoItems.push({
+            id: `D${String(baseIdx + autoItems.length + 1).padStart(3, '0')}`,
+            name: extractNameFromFile(file.name),
+            type: detectDesignType(file.name),
+            projectId: conn.projectId,
+            projectName: conn.projectName,
+            phase: '분석',
+            manager: '',
+            plannedStart: now,
+            plannedEnd: now,
+            status: '작성중',
+            customerReviewer: '',
+            customerReviewStatus: '검토전',
+            relatedRequirementIds: [],
+            currentVersion: 'v1.0',
+            versions: [],
+            createdAt: now,
+            updatedAt: now,
+          } as Design);
+        });
+
+        return { ...conn, importedFiles: [...imported, ...newFiles.map(f => f.name)] };
+      });
+
+      setFolderConnections(updatedConns);
+      if (autoItems.length > 0) {
+        setData(prev => [...prev, ...autoItems]);
+        localStorage.setItem('design-folder-connections', JSON.stringify(updatedConns));
+        setAutoImportNotice(`폴더 연결에서 ${autoItems.length}건 자동 가져오기 완료`);
+        setTimeout(() => setAutoImportNotice(''), 5000);
+      }
+    } catch {}
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   function persistFolderConnections(conns: FolderConnection[]) {
@@ -299,7 +429,6 @@ export default function Designs() {
     return matchProject && matchPhase && matchStatus && matchType && matchSearch;
   });
 
-  // KPI
   const kpi = {
     total: data.length,
     approved: data.filter(d => d.status === '승인완료').length,
@@ -307,17 +436,15 @@ export default function Designs() {
     rejected: data.filter(d => d.status === '반려').length,
     writing: data.filter(d => d.status === '작성중').length,
   };
-
   const projectNames = ['전체', ...Array.from(new Set(data.map(d => d.projectName)))];
 
-  // ── 뷰어 열기 ──
+  // 뷰어 열기
   function openViewer(d: Design) {
     setViewerTarget(d);
-    const latest = d.versions[d.versions.length - 1];
-    setViewerVersion(latest);
+    setViewerVersion(d.versions[d.versions.length - 1]);
   }
 
-  // ── 승인/반려 모달 열기 ──
+  // 승인/반려 열기
   function openApproval(d: Design, action: '승인' | '반려') {
     setApprovalTarget(d);
     setApprovalAction(action);
@@ -325,7 +452,7 @@ export default function Designs() {
     setApprovalReason('');
   }
 
-  // ── 승인/반려 확정 ──
+  // 승인/반려 확정
   function submitApproval() {
     if (!approvalTarget || !approvalAction) return;
     if (!approvalReviewer.trim()) { alert('검토자명을 입력해주세요.'); return; }
@@ -339,41 +466,25 @@ export default function Designs() {
       ? { ...d, status: newStatus, customerReviewStatus: newCR, actualEnd: now, updatedAt: now }
       : d
     ));
-
-    // 검토 이력 추가
-    const record: ReviewRecord = {
-      id: Date.now().toString(),
-      designId: approvalTarget.id,
-      designName: approvalTarget.name,
-      projectName: approvalTarget.projectName,
-      action: approvalAction,
-      reviewer: approvalReviewer,
-      reason: approvalReason,
-      reviewedAt: nowStr(),
-    };
-    const newLog = [...reviewLog, record];
-    persistReviewLog(newLog);
-
-    // 뷰어의 대상도 갱신
     if (viewerTarget?.id === approvalTarget.id) {
       setViewerTarget(prev => prev ? { ...prev, status: newStatus, customerReviewStatus: newCR } : null);
     }
 
-    setApprovalTarget(null);
-    setApprovalAction(null);
+    const record: ReviewRecord = {
+      id: Date.now().toString(),
+      designId: approvalTarget.id, designName: approvalTarget.name, projectName: approvalTarget.projectName,
+      action: approvalAction, reviewer: approvalReviewer, reason: approvalReason, reviewedAt: nowStr(),
+    };
+    persistReviewLog([...reviewLog, record]);
+    setApprovalTarget(null); setApprovalAction(null);
   }
 
-  // ── 검토이력 엑셀 다운로드 ──
+  // 검토이력 엑셀 다운로드
   function downloadReviewLogExcel() {
     if (reviewLog.length === 0) { alert('검토 이력이 없습니다.'); return; }
     const rows = reviewLog.map(r => ({
-      '설계ID': r.designId,
-      '산출물명': r.designName,
-      '프로젝트': r.projectName,
-      '검토결과': r.action,
-      '검토자': r.reviewer,
-      '반려사유': r.reason || '',
-      '검토일시': r.reviewedAt,
+      '설계ID': r.designId, '산출물명': r.designName, '프로젝트': r.projectName,
+      '검토결과': r.action, '검토자': r.reviewer, '반려사유': r.reason || '', '검토일시': r.reviewedAt,
     }));
     const ws = XLSX.utils.json_to_sheet(rows);
     ws['!cols'] = [{ wch: 10 }, { wch: 30 }, { wch: 25 }, { wch: 10 }, { wch: 15 }, { wch: 40 }, { wch: 20 }];
@@ -382,7 +493,7 @@ export default function Designs() {
     XLSX.writeFile(wb, `설계산출물_검토이력_${today()}.xlsx`);
   }
 
-  // ── 개별 폼 ──
+  // 개별 폼
   function openCreate() {
     setEditTarget(null); setForm(emptyForm());
     setPendingFile(null); setFileNote(''); setReqInput('');
@@ -402,14 +513,12 @@ export default function Designs() {
   }
   function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]; if (!file) return;
-    // 신규 등록이고 산출물명이 비어 있으면 파일명에서 자동 추출
     if (!editTarget && !form.name) {
-      setForm(f => ({ ...f, name: extractNameFromFile(file.name) }));
+      setForm(f => ({ ...f, name: extractNameFromFile(file.name), type: detectDesignType(file.name) }));
     }
     const reader = new FileReader();
     reader.onload = ev => {
-      const result = ev.target?.result as string;
-      setPendingFile({ name: file.name, size: `${(file.size / 1024 / 1024).toFixed(1)}MB`, data: result });
+      setPendingFile({ name: file.name, size: `${(file.size / 1024 / 1024).toFixed(1)}MB`, data: ev.target?.result as string });
     };
     reader.readAsDataURL(file);
   }
@@ -445,19 +554,18 @@ export default function Designs() {
     setShowForm(false);
   }
 
-  // ── 엑셀 템플릿 ──
+  // 엑셀 템플릿
   function downloadTemplate() {
     const headers = ['산출물명', '유형', '프로젝트명', '단계', '담당자', '계획시작일', '계획종료일', '고객검토자', '고객검토상태', '관련요구사항ID'];
     const example = ['통합 플랫폼 화면 설계서', '화면 설계서', '디지털 전환 플랫폼 구축', '설계', '홍길동', '2026-04-01', '2026-04-30', '이부장', '검토전', 'REQ-001,REQ-002'];
     const guide   = ['★필수', '요구사항 정의서|화면 설계서|데이터베이스 설계서', '선택', '분석|설계|구현|테스트|이행', '선택', 'YYYY-MM-DD', 'YYYY-MM-DD', '선택', '검토전|검토중|승인|반려', '콤마(,)로 구분'];
     const ws = XLSX.utils.aoa_to_sheet([headers, example, guide]);
     ws['!cols'] = headers.map(() => ({ wch: 24 }));
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, '설계산출물');
+    const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, '설계산출물');
     XLSX.writeFile(wb, '설계산출물_등록양식.xlsx');
   }
 
-  // ── 엑셀 일괄등록 ──
+  // 엑셀 일괄등록
   function handleExcelImportChange(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]; if (!file) return;
     const reader = new FileReader();
@@ -509,7 +617,7 @@ export default function Designs() {
     alert(`${newItems.length}건이 등록되었습니다.`);
   }
 
-  // ── 폴더 연결 ──
+  // 폴더 연결
   function handleFolderSelect(e: React.ChangeEvent<HTMLInputElement>) {
     const files = e.target.files; if (!files || files.length === 0) return;
     const fileList = Array.from(files).map(f => ({ name: f.name, size: `${(f.size / 1024).toFixed(0)}KB` }));
@@ -523,6 +631,7 @@ export default function Designs() {
       id: Date.now().toString(), projectId: fcProjectId, projectName: fcProjectName,
       folderPath: fcFolderPath || '선택된 폴더', scannedAt: today(),
       files: fcFiles.filter(f => fcSelected.has(f.name)),
+      importedFiles: [], // 새 연결은 아직 아무것도 가져오지 않음
     };
     persistFolderConnections([...folderConnections.filter(c => c.projectId !== fcProjectId), conn]);
     setFcProjectId(''); setFcProjectName(''); setFcFolderPath(''); setFcFiles([]); setFcSelected(new Set());
@@ -539,10 +648,13 @@ export default function Designs() {
       relatedRequirementIds: [], currentVersion: 'v1.0', versions: [], createdAt: now, updatedAt: now,
     }));
     setData(prev => [...prev, ...newItems]);
+    // 가져온 파일 기록
+    const updatedConn = { ...conn, importedFiles: conn.files.map(f => f.name) };
+    persistFolderConnections(folderConnections.map(c => c.id === conn.id ? updatedConn : c));
     alert(`${newItems.length}건이 등록되었습니다.`); setShowFolderConnect(false);
   }
 
-  // ── 뱃지 ──
+  // 뱃지
   function StatusBadge({ s }: { s: DesignStatus }) {
     return <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${STATUS_STYLE[s]}`}>{s}</span>;
   }
@@ -552,6 +664,15 @@ export default function Designs() {
 
   return (
     <div className="p-8">
+      {/* 자동 가져오기 토스트 */}
+      {autoImportNotice && (
+        <div className="fixed top-6 right-6 z-[100] bg-green-600 text-white text-sm px-5 py-3 rounded-xl shadow-lg flex items-center gap-3 animate-pulse">
+          <FolderOpen size={16} />
+          {autoImportNotice}
+          <button onClick={() => setAutoImportNotice('')}><X size={14} /></button>
+        </div>
+      )}
+
       {/* 헤더 */}
       <div className="flex items-center justify-between mb-8">
         <div>
@@ -559,8 +680,7 @@ export default function Designs() {
           <p className="text-gray-500 mt-1">프로젝트 단계별 설계 산출물 현황 및 승인 관리</p>
         </div>
         <div className="flex items-center gap-2 flex-wrap justify-end">
-          <button onClick={() => setShowReviewLog(true)}
-            className="btn-secondary flex items-center gap-2 text-sm relative">
+          <button onClick={() => setShowReviewLog(true)} className="btn-secondary flex items-center gap-2 text-sm relative">
             <List size={15} />검토이력
             {reviewLog.length > 0 && (
               <span className="absolute -top-1.5 -right-1.5 bg-blue-600 text-white text-xs rounded-full w-4 h-4 flex items-center justify-center leading-none">
@@ -569,7 +689,7 @@ export default function Designs() {
             )}
           </button>
           <button onClick={() => setShowFolderConnect(true)} className="btn-secondary flex items-center gap-2 text-sm">
-            <FolderOpen size={15} />폴더 연결
+            <FolderOpen size={15} />폴더 연결 {folderConnections.length > 0 && <span className="bg-amber-500 text-white text-xs rounded-full w-4 h-4 flex items-center justify-center">{folderConnections.length}</span>}
           </button>
           <button onClick={downloadTemplate} className="btn-secondary flex items-center gap-2 text-sm">
             <FileDown size={15} />템플릿
@@ -662,7 +782,7 @@ export default function Designs() {
                   </td>
                   <td className="px-4 py-3">
                     <div className="flex items-center gap-1.5">
-                      <button onClick={() => openViewer(d)} title="파일 보기/검토"
+                      <button onClick={() => openViewer(d)} title="보기/검토"
                         className="text-gray-400 hover:text-blue-600 transition-colors p-1 rounded hover:bg-blue-50">
                         <Eye size={15} />
                       </button>
@@ -670,7 +790,7 @@ export default function Designs() {
                         className="text-gray-400 hover:text-blue-600 transition-colors p-1 rounded hover:bg-blue-50">
                         <Upload size={15} />
                       </button>
-                      {(d.status === '검토중') && (
+                      {d.status === '검토중' && (
                         <>
                           <button onClick={() => openApproval(d, '승인')} title="승인"
                             className="text-gray-400 hover:text-green-600 transition-colors p-1 rounded hover:bg-green-50">
@@ -694,13 +814,12 @@ export default function Designs() {
         </div>
       </div>
 
-      {/* ──────── 파일 뷰어 + 검토 모달 ──────── */}
+      {/* ──────── 파일 뷰어 모달 ──────── */}
       {viewerTarget && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4"
           onClick={() => setViewerTarget(null)}>
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-6xl h-[90vh] flex flex-col"
             onClick={e => e.stopPropagation()}>
-            {/* 헤더 */}
             <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100 flex-shrink-0">
               <div className="flex items-center gap-3">
                 <span className="text-xs text-gray-400 font-mono">{viewerTarget.id}</span>
@@ -710,81 +829,48 @@ export default function Designs() {
               </div>
               <button onClick={() => setViewerTarget(null)} className="text-gray-400 hover:text-gray-600"><X size={20} /></button>
             </div>
-
-            {/* 바디 - 2컬럼 */}
             <div className="flex flex-1 overflow-hidden">
-              {/* 왼쪽: 메타데이터 + 검토 */}
-              <div className="w-72 border-r border-gray-100 flex flex-col overflow-y-auto flex-shrink-0">
-                <div className="p-5 space-y-3 flex-1">
-                  {[
-                    { label: '유형', value: viewerTarget.type },
-                    { label: '프로젝트', value: viewerTarget.projectName },
-                    { label: '단계', value: viewerTarget.phase },
-                    { label: '담당자', value: viewerTarget.manager || '—' },
-                    { label: '계획기간', value: `${viewerTarget.plannedStart.replace(/-/g,'.')} ~ ${viewerTarget.plannedEnd.replace(/-/g,'.')}` },
-                    { label: '고객검토자', value: viewerTarget.customerReviewer || '—' },
-                  ].map(item => (
-                    <div key={item.label}>
-                      <div className="text-xs text-gray-400 mb-0.5">{item.label}</div>
-                      <div className="text-sm font-medium text-gray-800">{item.value}</div>
-                    </div>
-                  ))}
-
-                  {viewerTarget.relatedRequirementIds.length > 0 && (
-                    <div>
-                      <div className="text-xs text-gray-400 mb-1">관련 요구사항</div>
-                      <div className="flex flex-wrap gap-1">
-                        {viewerTarget.relatedRequirementIds.map(id => (
-                          <span key={id} className="text-xs bg-blue-50 text-blue-600 px-2 py-0.5 rounded-full">{id}</span>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-
-                  {/* 버전 선택 */}
-                  {viewerTarget.versions.length > 0 && (
-                    <div>
-                      <div className="text-xs text-gray-400 mb-1">파일 버전</div>
-                      <select
-                        value={viewerVersion?.version || ''}
+              {/* 왼쪽: 컨트롤 */}
+              <div className="w-64 border-r border-gray-100 flex flex-col overflow-y-auto flex-shrink-0">
+                <div className="p-4 space-y-3 flex-1">
+                  <div className="text-xs font-semibold text-gray-500 mb-1">파일 버전</div>
+                  {viewerTarget.versions.length > 0 ? (
+                    <>
+                      <select value={viewerVersion?.version || ''}
                         onChange={e => setViewerVersion(viewerTarget.versions.find(v => v.version === e.target.value))}
                         className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
                         {[...viewerTarget.versions].reverse().map(v => (
-                          <option key={v.version} value={v.version}>
-                            {v.version} · {v.uploadedAt}
-                          </option>
+                          <option key={v.version} value={v.version}>{v.version} · {v.uploadedAt}</option>
                         ))}
                       </select>
                       {viewerVersion && (
-                        <div className="mt-2 text-xs text-gray-400">
-                          <div>{viewerVersion.fileName} ({viewerVersion.fileSize})</div>
-                          <div>{viewerVersion.uploadedBy} · {viewerVersion.note}</div>
+                        <div className="text-xs text-gray-400 leading-relaxed">
+                          <div className="font-medium text-gray-600 truncate">{viewerVersion.fileName}</div>
+                          <div>{viewerVersion.fileSize} · {viewerVersion.uploadedBy}</div>
+                          {viewerVersion.note && <div className="mt-0.5 text-blue-500">{viewerVersion.note}</div>}
                         </div>
                       )}
-                    </div>
+                    </>
+                  ) : (
+                    <p className="text-xs text-gray-400">첨부 파일 없음</p>
                   )}
                 </div>
-
-                {/* 검토 버튼 영역 */}
-                <div className="p-5 border-t border-gray-100 space-y-2 flex-shrink-0">
+                <div className="p-4 border-t border-gray-100 space-y-2 flex-shrink-0">
                   <p className="text-xs font-semibold text-gray-500 mb-3">산출물 검토</p>
-                  <button
-                    onClick={() => openApproval(viewerTarget, '승인')}
+                  <button onClick={() => openApproval(viewerTarget, '승인')}
                     className="w-full flex items-center justify-center gap-2 bg-green-600 text-white text-sm px-4 py-2.5 rounded-xl hover:bg-green-700 transition-colors font-medium">
                     <ThumbsUp size={15} />승인
                   </button>
-                  <button
-                    onClick={() => openApproval(viewerTarget, '반려')}
+                  <button onClick={() => openApproval(viewerTarget, '반려')}
                     className="w-full flex items-center justify-center gap-2 bg-red-500 text-white text-sm px-4 py-2.5 rounded-xl hover:bg-red-600 transition-colors font-medium">
                     <ThumbsDown size={15} />반려 (사유 입력)
                   </button>
                   <button onClick={() => openEdit(viewerTarget)}
-                    className="w-full flex items-center justify-center gap-2 btn-secondary text-sm py-2.5">
+                    className="w-full flex items-center justify-center gap-2 btn-secondary text-sm py-2">
                     <Upload size={14} />수정
                   </button>
                 </div>
               </div>
-
               {/* 오른쪽: 파일 미리보기 */}
               <div className="flex-1 p-4 overflow-hidden">
                 <FilePreview design={viewerTarget!} ver={viewerVersion} />
@@ -794,18 +880,14 @@ export default function Designs() {
         </div>
       )}
 
-      {/* ──────── 승인/반려 확인 모달 ──────── */}
+      {/* ──────── 승인/반려 모달 ──────── */}
       {approvalTarget && approvalAction && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[60] p-4">
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md">
             <div className={`flex items-center gap-3 px-6 py-5 rounded-t-2xl ${approvalAction === '승인' ? 'bg-green-50' : 'bg-red-50'}`}>
-              {approvalAction === '승인'
-                ? <ThumbsUp size={22} className="text-green-600" />
-                : <ThumbsDown size={22} className="text-red-500" />}
+              {approvalAction === '승인' ? <ThumbsUp size={22} className="text-green-600" /> : <ThumbsDown size={22} className="text-red-500" />}
               <div>
-                <h3 className="font-bold text-gray-900 text-lg">
-                  {approvalAction === '승인' ? '산출물 승인' : '산출물 반려'}
-                </h3>
+                <h3 className="font-bold text-gray-900 text-lg">{approvalAction === '승인' ? '산출물 승인' : '산출물 반려'}</h3>
                 <p className="text-sm text-gray-500 mt-0.5">{approvalTarget.name}</p>
               </div>
             </div>
@@ -819,16 +901,13 @@ export default function Designs() {
               {approvalAction === '반려' && (
                 <div>
                   <label className="text-xs font-medium text-gray-500 mb-1 block">반려 사유 *</label>
-                  <textarea value={approvalReason} onChange={e => setApprovalReason(e.target.value)}
-                    rows={4}
+                  <textarea value={approvalReason} onChange={e => setApprovalReason(e.target.value)} rows={4}
                     className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
                     placeholder="반려 사유를 구체적으로 입력해주세요." />
                 </div>
               )}
               <div className={`text-xs rounded-lg px-3 py-2 ${approvalAction === '승인' ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'}`}>
-                {approvalAction === '승인'
-                  ? '✓ 산출물 상태가 [승인완료]로 변경되고 검토이력에 기록됩니다.'
-                  : '✓ 산출물 상태가 [반려]로 변경되고 검토이력에 반려사유가 기록됩니다.'}
+                {approvalAction === '승인' ? '✓ [승인완료]로 변경되고 검토이력에 기록됩니다.' : '✓ [반려]로 변경되고 반려사유가 검토이력에 기록됩니다.'}
               </div>
             </div>
             <div className="flex justify-end gap-3 px-6 pb-5">
@@ -855,8 +934,7 @@ export default function Designs() {
                 <span className="text-sm text-gray-400">{reviewLog.length}건</span>
               </div>
               <div className="flex items-center gap-2">
-                <button onClick={downloadReviewLogExcel}
-                  className="btn-secondary flex items-center gap-2 text-sm">
+                <button onClick={downloadReviewLogExcel} className="btn-secondary flex items-center gap-2 text-sm">
                   <Download size={14} />엑셀 다운로드
                 </button>
                 <button onClick={() => setShowReviewLog(false)} className="text-gray-400 hover:text-gray-600"><X size={20} /></button>
@@ -869,37 +947,34 @@ export default function Designs() {
                   <p className="text-sm">아직 검토이력이 없습니다.</p>
                 </div>
               ) : (
-                <div className="overflow-x-auto">
-                  <table className="w-full text-sm">
-                    <thead>
-                      <tr className="bg-gray-50 text-left">
-                        {['설계ID', '산출물명', '프로젝트', '결과', '검토자', '반려사유', '검토일시'].map(h => (
-                          <th key={h} className="px-4 py-3 text-xs font-semibold text-gray-500 whitespace-nowrap">{h}</th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-gray-100">
-                      {[...reviewLog].reverse().map(r => (
-                        <tr key={r.id} className="hover:bg-gray-50">
-                          <td className="px-4 py-3 text-xs text-gray-400 font-mono">{r.designId}</td>
-                          <td className="px-4 py-3 font-medium text-gray-800 max-w-[180px] truncate">{r.designName}</td>
-                          <td className="px-4 py-3 text-gray-600 text-xs">{r.projectName}</td>
-                          <td className="px-4 py-3">
-                            <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-medium ${r.action === '승인' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
-                              {r.action === '승인' ? <CheckCircle size={11} /> : <AlertCircle size={11} />}
-                              {r.action}
-                            </span>
-                          </td>
-                          <td className="px-4 py-3 text-gray-700">{r.reviewer}</td>
-                          <td className="px-4 py-3 text-xs text-gray-500 max-w-[200px]">
-                            {r.reason ? <span title={r.reason} className="truncate block">{r.reason}</span> : <span className="text-gray-300">—</span>}
-                          </td>
-                          <td className="px-4 py-3 text-xs text-gray-400 whitespace-nowrap">{r.reviewedAt}</td>
-                        </tr>
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="bg-gray-50 text-left">
+                      {['설계ID', '산출물명', '프로젝트', '결과', '검토자', '반려사유', '검토일시'].map(h => (
+                        <th key={h} className="px-4 py-3 text-xs font-semibold text-gray-500 whitespace-nowrap">{h}</th>
                       ))}
-                    </tbody>
-                  </table>
-                </div>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100">
+                    {[...reviewLog].reverse().map(r => (
+                      <tr key={r.id} className="hover:bg-gray-50">
+                        <td className="px-4 py-3 text-xs text-gray-400 font-mono">{r.designId}</td>
+                        <td className="px-4 py-3 font-medium text-gray-800 max-w-[180px] truncate">{r.designName}</td>
+                        <td className="px-4 py-3 text-gray-600 text-xs">{r.projectName}</td>
+                        <td className="px-4 py-3">
+                          <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-medium ${r.action === '승인' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
+                            {r.action === '승인' ? <CheckCircle size={11} /> : <AlertCircle size={11} />}{r.action}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3 text-gray-700">{r.reviewer}</td>
+                        <td className="px-4 py-3 text-xs text-gray-500 max-w-[200px]">
+                          {r.reason ? <span title={r.reason} className="truncate block">{r.reason}</span> : <span className="text-gray-300">—</span>}
+                        </td>
+                        <td className="px-4 py-3 text-xs text-gray-400 whitespace-nowrap">{r.reviewedAt}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               )}
             </div>
           </div>
@@ -919,7 +994,7 @@ export default function Designs() {
             <div className="p-6 space-y-4">
               <div className="flex items-center gap-2 p-3 bg-blue-50 rounded-lg text-sm text-blue-700">
                 <FileDown size={15} />
-                <span>먼저 <button onClick={downloadTemplate} className="font-semibold underline hover:text-blue-900">템플릿을 다운로드</button>하여 양식에 맞게 작성한 후 업로드하세요.</span>
+                <span>먼저 <button onClick={downloadTemplate} className="font-semibold underline hover:text-blue-900">템플릿을 다운로드</button>하여 작성 후 업로드하세요.</span>
               </div>
               {!importFileName ? (
                 <div onClick={() => excelImportRef.current?.click()}
@@ -932,20 +1007,14 @@ export default function Designs() {
                   <div className="flex items-center gap-3 bg-green-50 border border-green-200 rounded-xl px-4 py-3">
                     <FileSpreadsheet size={18} className="text-green-600" />
                     <span className="text-sm font-medium text-green-800">{importFileName}</span>
-                    <span className="text-xs text-green-600">· {importRows.length}건 파싱됨</span>
+                    <span className="text-xs text-green-600">· {importRows.length}건</span>
                     <button onClick={() => { setImportRows([]); setImportFileName(''); if (excelImportRef.current) excelImportRef.current.value = ''; }}
                       className="ml-auto text-gray-400 hover:text-red-500"><X size={16} /></button>
                   </div>
                   {importRows.length > 0 && (
                     <div className="overflow-x-auto rounded-lg border border-gray-100">
                       <table className="w-full text-xs">
-                        <thead>
-                          <tr className="bg-gray-50">
-                            {['산출물명', '유형', '프로젝트명', '단계', '담당자', '계획시작일', '계획종료일'].map(h => (
-                              <th key={h} className="px-3 py-2 text-left font-semibold text-gray-500 whitespace-nowrap">{h}</th>
-                            ))}
-                          </tr>
-                        </thead>
+                        <thead><tr className="bg-gray-50">{['산출물명', '유형', '프로젝트명', '단계', '담당자', '계획시작일', '계획종료일'].map(h => <th key={h} className="px-3 py-2 text-left font-semibold text-gray-500 whitespace-nowrap">{h}</th>)}</tr></thead>
                         <tbody className="divide-y divide-gray-100">
                           {importRows.slice(0, 10).map((row, i) => (
                             <tr key={i} className="hover:bg-gray-50">
@@ -960,9 +1029,7 @@ export default function Designs() {
                           ))}
                         </tbody>
                       </table>
-                      {importRows.length > 10 && (
-                        <div className="text-center text-xs text-gray-400 py-2 border-t">10건만 미리보기 (전체 {importRows.length}건)</div>
-                      )}
+                      {importRows.length > 10 && <div className="text-center text-xs text-gray-400 py-2 border-t">10건만 미리보기 (전체 {importRows.length}건)</div>}
                     </div>
                   )}
                 </>
@@ -993,14 +1060,19 @@ export default function Designs() {
             <div className="p-6 space-y-6">
               {folderConnections.length > 0 && (
                 <div>
-                  <h3 className="text-sm font-semibold text-gray-700 mb-3">저장된 폴더 연결</h3>
+                  <h3 className="text-sm font-semibold text-gray-700 mb-1">저장된 폴더 연결</h3>
+                  <p className="text-xs text-gray-400 mb-3">앱 시작 시 새 파일을 자동으로 가져옵니다.</p>
                   <div className="space-y-2">
                     {folderConnections.map(conn => (
                       <div key={conn.id} className="flex items-center gap-3 bg-amber-50 border border-amber-100 rounded-xl px-4 py-3">
                         <FolderOpen size={16} className="text-amber-500 flex-shrink-0" />
                         <div className="flex-1 min-w-0">
                           <div className="text-sm font-medium text-gray-800 truncate">{conn.folderPath}</div>
-                          <div className="text-xs text-gray-400">{conn.projectName} · {conn.files.length}개 파일 · {conn.scannedAt}</div>
+                          <div className="text-xs text-gray-400">
+                            {conn.projectName} · {conn.files.length}개 파일
+                            · 가져옴 {conn.importedFiles?.length ?? 0}/{conn.files.length}
+                            · {conn.scannedAt}
+                          </div>
                         </div>
                         <button onClick={() => importFromFolderConnection(conn)}
                           className="text-xs bg-blue-600 text-white px-3 py-1.5 rounded-lg hover:bg-blue-700 transition-colors flex-shrink-0">
@@ -1052,6 +1124,7 @@ export default function Designs() {
                               onChange={e => { const next = new Set(fcSelected); e.target.checked ? next.add(file.name) : next.delete(file.name); setFcSelected(next); }}
                               className="w-4 h-4 text-blue-600 rounded" />
                             <span className="flex-1 text-sm text-gray-700 truncate">{file.name}</span>
+                            <span className="text-xs text-gray-400 flex-shrink-0 mr-2">{detectDesignType(file.name)}</span>
                             <span className="text-xs text-gray-400 flex-shrink-0">{file.size}</span>
                           </label>
                         ))}
@@ -1076,7 +1149,7 @@ export default function Designs() {
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4" onClick={() => setShowForm(false)}>
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
             <div className="flex items-center justify-between p-6 border-b border-gray-100">
-              <h2 className="text-lg font-bold text-gray-900">{editTarget ? '설계산출물 수정' : '설계산출물 개별 등록'}</h2>
+              <h2 className="text-lg font-bold text-gray-900">{editTarget ? '설계산출물 수정' : '설계산출물 등록'}</h2>
               <button onClick={() => setShowForm(false)} className="text-gray-400 hover:text-gray-600"><X size={20} /></button>
             </div>
             <div className="p-6 space-y-5">
