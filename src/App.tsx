@@ -8,6 +8,7 @@ import Risks from './pages/Risks';
 import Reports from './pages/Reports';
 import Requirements from './pages/Requirements';
 import Designs from './pages/Designs';
+import AgentTeam from './pages/AgentTeam';
 
 export default function App() {
   return (
@@ -22,6 +23,7 @@ export default function App() {
           <Route path="reports" element={<Reports />} />
           <Route path="requirements" element={<Requirements />} />
           <Route path="designs" element={<Designs />} />
+          <Route path="agent-team" element={<AgentTeam />} />
         </Route>
       </Routes>
     </BrowserRouter>

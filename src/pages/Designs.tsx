@@ -419,6 +419,10 @@ export default function Designs() {
     const rl = localStorage.getItem('design-review-log');
     if (rl) { try { setReviewLog(JSON.parse(rl)); } catch {} }
 
+    // 등록/수정된 설계산출물 로드 (초기 mock 데이터 위에 덮어씀)
+    const savedData = localStorage.getItem('design-data');
+    if (savedData) { try { setData(JSON.parse(savedData)); } catch {} }
+
     const fc = localStorage.getItem('design-folder-connections');
     if (!fc) return;
     try {
@@ -512,6 +516,10 @@ export default function Designs() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  function persistData(designs: Design[]) {
+    setData(designs);
+    localStorage.setItem('design-data', JSON.stringify(designs));
+  }
   function persistFolderConnections(conns: FolderConnection[]) {
     setFolderConnections(conns);
     localStorage.setItem('design-folder-connections', JSON.stringify(conns));
@@ -565,7 +573,7 @@ export default function Designs() {
     const newStatus: DesignStatus = approvalAction === '승인' ? '승인완료' : '반려';
     const newCR: CustomerReviewStatus = approvalAction === '승인' ? '승인' : '반려';
 
-    setData(prev => prev.map(d => d.id === approvalTarget.id
+    persistData(data.map(d => d.id === approvalTarget.id
       ? { ...d, status: newStatus, customerReviewStatus: newCR, actualEnd: now, updatedAt: now }
       : d
     ));
@@ -640,7 +648,7 @@ export default function Designs() {
           fileData: pendingFile.data, uploadedAt: now, uploadedBy: form.manager, note: fileNote || '업데이트',
         });
       }
-      setData(prev => prev.map(d => d.id === editTarget.id
+      persistData(data.map(d => d.id === editTarget.id
         ? { ...d, ...form, currentVersion: newVersion, versions: updatedVersions, updatedAt: now }
         : d));
     } else {
@@ -652,7 +660,7 @@ export default function Designs() {
         });
       }
       const newId = `D${String(data.length + 1).padStart(3, '0')}`;
-      setData(prev => [...prev, { ...form, id: newId, versions, createdAt: now, updatedAt: now } as Design]);
+      persistData([...data, { ...form, id: newId, versions, createdAt: now, updatedAt: now } as Design]);
     }
     setShowForm(false);
   }
@@ -714,7 +722,7 @@ export default function Designs() {
         createdAt: now, updatedAt: now,
       } as Design;
     });
-    setData(prev => [...prev, ...newItems]);
+    persistData([...data, ...newItems]);
     setShowExcelImport(false); setImportRows([]); setImportFileName('');
     if (excelImportRef.current) excelImportRef.current.value = '';
     alert(`${newItems.length}건이 등록되었습니다.`);
@@ -782,7 +790,7 @@ export default function Designs() {
       }] : [],
       createdAt: now, updatedAt: now,
     }));
-    setData(prev => [...prev, ...newItems]);
+    persistData([...data, ...newItems]);
     const updatedConn = { ...conn, importedFiles: conn.files.map(f => f.name) };
     persistFolderConnections(folderConnections.map(c => c.id === conn.id ? updatedConn : c));
     alert(`${newItems.length}건이 등록되었습니다.`); setShowFolderConnect(false);

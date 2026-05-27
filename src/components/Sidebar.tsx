@@ -10,6 +10,7 @@ import {
   Building2,
   ClipboardList,
   Layers,
+  Bot,
 } from 'lucide-react';
 
 const navItems = [
@@ -21,6 +22,7 @@ const navItems = [
   { path: '/reports', label: '보고서', icon: BarChart3 },
   { path: '/requirements', label: '요구사항', icon: ClipboardList },
   { path: '/designs', label: '설계산출물', icon: Layers },
+  { path: '/agent-team', label: '에이전트 팀', icon: Bot },
 ];
 
 export default function Sidebar() {
