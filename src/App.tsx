@@ -7,6 +7,7 @@ import Resources from './pages/Resources';
 import Risks from './pages/Risks';
 import Reports from './pages/Reports';
 import Requirements from './pages/Requirements';
+import Designs from './pages/Designs';
 
 export default function App() {
   return (
@@ -20,6 +21,7 @@ export default function App() {
           <Route path="risks" element={<Risks />} />
           <Route path="reports" element={<Reports />} />
           <Route path="requirements" element={<Requirements />} />
+          <Route path="designs" element={<Designs />} />
         </Route>
       </Routes>
     </BrowserRouter>

@@ -9,6 +9,7 @@ import {
   Settings,
   Building2,
   ClipboardList,
+  Layers,
 } from 'lucide-react';
 
 const navItems = [
@@ -19,6 +20,7 @@ const navItems = [
   { path: '/risks', label: '리스크', icon: AlertTriangle },
   { path: '/reports', label: '보고서', icon: BarChart3 },
   { path: '/requirements', label: '요구사항', icon: ClipboardList },
+  { path: '/designs', label: '설계산출물', icon: Layers },
 ];
 
 export default function Sidebar() {
