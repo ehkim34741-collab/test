@@ -50,9 +50,10 @@ interface FolderConnection {
   projectId: string;
   projectName: string;
   folderPath: string;
+  sourceType: 'browser' | 'server';
   scannedAt: string;
   files: { name: string; size: string }[];
-  importedFiles: string[]; // 이미 가져온 파일 추적
+  importedFiles: string[];
 }
 
 interface ReviewRecord {
@@ -183,7 +184,61 @@ function ExcelViewer({ fileData }: { fileData: string }) {
 
 // ────────────── 파일 미리보기 ──────────────
 function FilePreview({ design, ver }: { design: Design; ver?: DesignVersion }) {
-  if (!ver?.fileData) {
+  const [serverData, setServerData] = useState<string | null>(null);
+  const [serverLoading, setServerLoading] = useState(false);
+  const [serverError, setServerError] = useState('');
+
+  useEffect(() => {
+    if (!ver?.serverDir || ver.fileData) {
+      setServerData(null);
+      setServerError('');
+      return;
+    }
+    setServerLoading(true);
+    setServerData(null);
+    setServerError('');
+    fetch(`/api/docs/content?dir=${encodeURIComponent(ver.serverDir)}&file=${encodeURIComponent(ver.fileName)}`)
+      .then(r => r.json())
+      .then(d => {
+        if (d.error) setServerError(d.error);
+        else setServerData(d.dataUrl);
+      })
+      .catch(() => setServerError('파일 서버(server.js)에 연결할 수 없습니다.\nnpm run server 또는 npm run dev:full 을 실행하세요.'))
+      .finally(() => setServerLoading(false));
+  }, [ver?.serverDir, ver?.fileName, ver?.fileData]);
+
+  const effectiveFileData = ver?.fileData || serverData;
+
+  // 서버 파일 로딩 상태
+  if (ver?.serverDir && !ver.fileData) {
+    if (serverLoading) {
+      return (
+        <div className="flex flex-col items-center justify-center h-full text-gray-400 gap-3">
+          <div className="animate-spin rounded-full h-10 w-10 border-2 border-blue-500 border-t-transparent" />
+          <p className="text-sm text-gray-500">서버에서 파일 로딩 중...</p>
+          <p className="text-xs text-gray-400 font-mono">{ver.fileName}</p>
+        </div>
+      );
+    }
+    if (serverError) {
+      return (
+        <div className="flex flex-col items-center justify-center h-full gap-4 p-6">
+          <AlertCircle size={40} className="text-red-400" />
+          <p className="text-sm font-semibold text-gray-700">파일을 불러올 수 없습니다</p>
+          <p className="text-xs text-red-500 text-center whitespace-pre-line">{serverError}</p>
+          <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 text-xs text-amber-800 text-left w-full max-w-sm">
+            <p className="font-semibold mb-2">해결 방법:</p>
+            <p>프로젝트 폴더에서 아래 명령 실행:</p>
+            <code className="block bg-amber-100 rounded px-2 py-1 mt-1 font-mono">npm run dev:full</code>
+            <p className="mt-2 text-amber-600">또는 별도 터미널에서:</p>
+            <code className="block bg-amber-100 rounded px-2 py-1 mt-1 font-mono">npm run server</code>
+          </div>
+        </div>
+      );
+    }
+  }
+
+  if (!effectiveFileData) {
     const ext = ver?.fileName.split('.').pop()?.toLowerCase();
     const iconColor = ext === 'xlsx' || ext === 'xls' ? 'text-green-500'
       : ext === 'pptx' || ext === 'ppt' ? 'text-orange-500'
@@ -262,38 +317,38 @@ function FilePreview({ design, ver }: { design: Design; ver?: DesignVersion }) {
     );
   }
 
-  const mimeType = ver.fileData.split(';')[0].replace('data:', '');
-  const ext = ver.fileName.split('.').pop()?.toLowerCase();
+  const mimeType = effectiveFileData!.split(';')[0].replace('data:', '');
+  const ext = ver!.fileName.split('.').pop()?.toLowerCase();
 
   // PDF → 인라인 뷰어
   if (mimeType === 'application/pdf') {
-    return <iframe src={ver.fileData} className="w-full h-full rounded-lg border border-gray-200" title={ver.fileName} />;
+    return <iframe src={effectiveFileData!} className="w-full h-full rounded-lg border border-gray-200" title={ver!.fileName} />;
   }
   // 이미지 → 직접 표시
   if (mimeType.startsWith('image/')) {
     return (
       <div className="flex items-center justify-center h-full bg-gray-50 rounded-lg border border-gray-200">
-        <img src={ver.fileData} alt={ver.fileName} className="max-w-full max-h-full object-contain p-4" />
+        <img src={effectiveFileData!} alt={ver!.fileName} className="max-w-full max-h-full object-contain p-4" />
       </div>
     );
   }
   // Excel / CSV → XLSX 라이브러리로 테이블 렌더링
   if (ext === 'xlsx' || ext === 'xls' || ext === 'csv') {
-    return <ExcelViewer fileData={ver.fileData} />;
+    return <ExcelViewer fileData={effectiveFileData!} />;
   }
 
-  // PPT / Word 등 — 다운로드 안내
+  // PPT / Word / HWP 등 — 다운로드 안내
   const iconColor = ext === 'pptx' || ext === 'ppt' ? 'text-orange-500'
     : ext === 'docx' || ext === 'doc' ? 'text-blue-500' : 'text-gray-400';
   return (
     <div className="flex flex-col items-center justify-center h-full bg-gray-50 rounded-xl border border-gray-200">
       <FileText size={56} className={`${iconColor} mb-4`} />
-      <p className="text-sm font-semibold text-gray-700 mb-1">{ver.fileName}</p>
-      <p className="text-xs text-gray-400 mb-2">{ver.fileSize} · {ver.version} · {ver.uploadedAt}</p>
+      <p className="text-sm font-semibold text-gray-700 mb-1">{ver!.fileName}</p>
+      <p className="text-xs text-gray-400 mb-2">{ver!.fileSize} · {ver!.version} · {ver!.uploadedAt}</p>
       <p className="text-xs text-amber-600 bg-amber-50 rounded-lg px-3 py-2 mb-5 text-center">
-        PowerPoint · Word 파일은 브라우저 보안 정책으로 인해<br />인라인 미리보기가 지원되지 않습니다.
+        PowerPoint · Word · HWP 파일은 브라우저 보안 정책으로 인해<br />인라인 미리보기가 지원되지 않습니다.
       </p>
-      <a href={ver.fileData} download={ver.fileName}
+      <a href={effectiveFileData!} download={ver!.fileName}
         className="flex items-center gap-2 bg-blue-600 text-white text-sm px-5 py-2.5 rounded-xl hover:bg-blue-700 transition-colors font-medium">
         <Download size={15} />파일 다운로드
       </a>
@@ -351,60 +406,108 @@ export default function Designs() {
   const [fcFiles, setFcFiles] = useState<{ name: string; size: string }[]>([]);
   const [fcSelected, setFcSelected] = useState<Set<string>>(new Set());
   const folderRef = useRef<HTMLInputElement>(null);
+  // 서버 경로 모드
+  const [fcSourceType, setFcSourceType] = useState<'browser' | 'server'>('server');
+  const [fcServerPath, setFcServerPath] = useState('C:\\project\\test\\doc');
+  const [fcTestLoading, setFcTestLoading] = useState(false);
+  const [fcTestError, setFcTestError] = useState('');
 
   // ── 앱 시작 시 localStorage 로드 + 폴더 연결 자동 매핑 ──
   useEffect(() => {
     const now = today();
 
-    // 검토이력
     const rl = localStorage.getItem('design-review-log');
     if (rl) { try { setReviewLog(JSON.parse(rl)); } catch {} }
 
-    // 폴더 연결 로드 + 자동 가져오기
     const fc = localStorage.getItem('design-folder-connections');
     if (!fc) return;
     try {
       const conns: FolderConnection[] = JSON.parse(fc);
-      let autoItems: Design[] = [];
-      let baseIdx = initialDesigns.length;
+      setFolderConnections(conns);
 
+      // ── 브라우저 연결: 동기 자동 가져오기 ──
+      const browserConns = conns.filter(c => !c.sourceType || c.sourceType === 'browser');
+      let browserItems: Design[] = [];
       const updatedConns = conns.map(conn => {
+        if (conn.sourceType === 'server') return conn;
         const imported = conn.importedFiles ?? [];
         const newFiles = conn.files.filter(f => !imported.includes(f.name));
         if (newFiles.length === 0) return conn;
-
         newFiles.forEach(file => {
-          autoItems.push({
-            id: `D${String(baseIdx + autoItems.length + 1).padStart(3, '0')}`,
-            name: extractNameFromFile(file.name),
-            type: detectDesignType(file.name),
-            projectId: conn.projectId,
-            projectName: conn.projectName,
-            phase: '분석',
-            manager: '',
-            plannedStart: now,
-            plannedEnd: now,
-            status: '작성중',
-            customerReviewer: '',
-            customerReviewStatus: '검토전',
-            relatedRequirementIds: [],
-            currentVersion: 'v1.0',
-            versions: [],
-            createdAt: now,
-            updatedAt: now,
+          browserItems.push({
+            id: `D${String(initialDesigns.length + browserItems.length + 1).padStart(3, '0')}`,
+            name: extractNameFromFile(file.name), type: detectDesignType(file.name),
+            projectId: conn.projectId, projectName: conn.projectName,
+            phase: '분석', manager: '', plannedStart: now, plannedEnd: now,
+            status: '작성중', customerReviewer: '', customerReviewStatus: '검토전',
+            relatedRequirementIds: [], currentVersion: 'v1.0', versions: [],
+            createdAt: now, updatedAt: now,
           } as Design);
         });
-
         return { ...conn, importedFiles: [...imported, ...newFiles.map(f => f.name)] };
       });
 
-      setFolderConnections(updatedConns);
-      if (autoItems.length > 0) {
-        setData(prev => [...prev, ...autoItems]);
+      if (browserItems.length > 0) {
+        setData(prev => [...prev, ...browserItems]);
         localStorage.setItem('design-folder-connections', JSON.stringify(updatedConns));
-        setAutoImportNotice(`폴더 연결에서 ${autoItems.length}건 자동 가져오기 완료`);
+        setFolderConnections(updatedConns);
+        setAutoImportNotice(`폴더 연결에서 ${browserItems.length}건 자동 가져오기 완료`);
         setTimeout(() => setAutoImportNotice(''), 5000);
       }
+
+      // ── 서버 연결: 비동기 자동 가져오기 ──
+      const serverConns = conns.filter(c => c.sourceType === 'server');
+      if (serverConns.length === 0) return;
+
+      setAutoImportNotice('서버 파일 확인 중...');
+      Promise.all(
+        serverConns.map(async conn => {
+          try {
+            const res = await fetch(`/api/docs/files?dir=${encodeURIComponent(conn.folderPath)}`);
+            const data = await res.json();
+            if (data.error) return null;
+            return { conn, serverFiles: data.files as { name: string; size: string }[] };
+          } catch { return null; }
+        })
+      ).then(results => {
+        const validResults = results.filter(Boolean) as { conn: FolderConnection; serverFiles: { name: string; size: string }[] }[];
+        if (validResults.length === 0) { setAutoImportNotice(''); return; }
+
+        let serverItems: Design[] = [];
+        const finalConns = conns.map(conn => {
+          const r = validResults.find(v => v.conn.id === conn.id);
+          if (!r) return conn;
+          const imported = conn.importedFiles ?? [];
+          const newFiles = r.serverFiles.filter(f => !imported.includes(f.name));
+          if (newFiles.length === 0) return { ...conn, files: r.serverFiles };
+          newFiles.forEach(file => {
+            serverItems.push({
+              id: `DS${Date.now()}-${serverItems.length}`,
+              name: extractNameFromFile(file.name), type: detectDesignType(file.name),
+              projectId: conn.projectId, projectName: conn.projectName,
+              phase: '분석', manager: '', plannedStart: now, plannedEnd: now,
+              status: '작성중', customerReviewer: '', customerReviewStatus: '검토전',
+              relatedRequirementIds: [], currentVersion: 'v1.0',
+              versions: [{
+                version: 'v1.0', fileName: file.name, fileSize: file.size,
+                serverDir: conn.folderPath, uploadedAt: now, uploadedBy: '(서버)', note: '서버 폴더 연결',
+              }],
+              createdAt: now, updatedAt: now,
+            } as Design);
+          });
+          return { ...conn, files: r.serverFiles, importedFiles: [...imported, ...newFiles.map(f => f.name)] };
+        });
+
+        setFolderConnections(finalConns);
+        localStorage.setItem('design-folder-connections', JSON.stringify(finalConns));
+        if (serverItems.length > 0) {
+          setData(prev => [...prev, ...serverItems]);
+          setAutoImportNotice(`서버 폴더에서 ${serverItems.length}건 자동 가져오기 완료`);
+        } else {
+          setAutoImportNotice('');
+        }
+        setTimeout(() => setAutoImportNotice(''), 5000);
+      });
     } catch {}
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -625,18 +728,45 @@ export default function Designs() {
     const rel = (files[0] as File & { webkitRelativePath?: string }).webkitRelativePath;
     if (rel) setFcFolderPath(rel.split('/')[0]);
   }
-  function saveFolderConnection() {
-    if (!fcProjectId || fcFiles.length === 0) { alert('프로젝트를 선택하고 폴더를 지정해주세요.'); return; }
-    const conn: FolderConnection = {
-      id: Date.now().toString(), projectId: fcProjectId, projectName: fcProjectName,
-      folderPath: fcFolderPath || '선택된 폴더', scannedAt: today(),
-      files: fcFiles.filter(f => fcSelected.has(f.name)),
-      importedFiles: [], // 새 연결은 아직 아무것도 가져오지 않음
-    };
-    persistFolderConnections([...folderConnections.filter(c => c.projectId !== fcProjectId), conn]);
-    setFcProjectId(''); setFcProjectName(''); setFcFolderPath(''); setFcFiles([]); setFcSelected(new Set());
+
+  async function testServerConnection() {
+    if (!fcServerPath.trim()) { alert('서버 경로를 입력해주세요.'); return; }
+    setFcTestLoading(true); setFcTestError(''); setFcFiles([]); setFcSelected(new Set());
+    try {
+      const res = await fetch(`/api/docs/files?dir=${encodeURIComponent(fcServerPath)}`);
+      const data = await res.json();
+      if (data.error) { setFcTestError(data.error); }
+      else {
+        setFcFiles(data.files);
+        setFcSelected(new Set((data.files as { name: string }[]).map(f => f.name)));
+      }
+    } catch {
+      setFcTestError('파일 서버에 연결할 수 없습니다.\nnpm run server 또는 npm run dev:full 을 먼저 실행하세요.');
+    }
+    setFcTestLoading(false);
+  }
+
+  function resetFcForm() {
+    setFcProjectId(''); setFcProjectName(''); setFcFolderPath('');
+    setFcFiles([]); setFcSelected(new Set()); setFcServerPath('C:\\project\\test\\doc');
+    setFcTestError(''); setFcTestLoading(false);
     if (folderRef.current) folderRef.current.value = '';
   }
+
+  function saveFolderConnection() {
+    if (!fcProjectId || fcSelected.size === 0) { alert('프로젝트를 선택하고 파일을 확인해주세요.'); return; }
+    const conn: FolderConnection = {
+      id: Date.now().toString(), projectId: fcProjectId, projectName: fcProjectName,
+      folderPath: fcSourceType === 'server' ? fcServerPath : (fcFolderPath || '선택된 폴더'),
+      sourceType: fcSourceType,
+      scannedAt: today(),
+      files: fcFiles.filter(f => fcSelected.has(f.name)),
+      importedFiles: [],
+    };
+    persistFolderConnections([...folderConnections.filter(c => c.projectId !== fcProjectId), conn]);
+    resetFcForm();
+  }
+
   function importFromFolderConnection(conn: FolderConnection) {
     const now = today();
     const newItems: Design[] = conn.files.map((file, i) => ({
@@ -645,10 +775,14 @@ export default function Designs() {
       projectId: conn.projectId, projectName: conn.projectName,
       phase: '분석' as DesignPhase, manager: '', plannedStart: now, plannedEnd: now,
       status: '작성중' as DesignStatus, customerReviewer: '', customerReviewStatus: '검토전' as CustomerReviewStatus,
-      relatedRequirementIds: [], currentVersion: 'v1.0', versions: [], createdAt: now, updatedAt: now,
+      relatedRequirementIds: [], currentVersion: 'v1.0',
+      versions: conn.sourceType === 'server' ? [{
+        version: 'v1.0', fileName: file.name, fileSize: file.size,
+        serverDir: conn.folderPath, uploadedAt: now, uploadedBy: '(서버)', note: '서버 폴더 연결',
+      }] : [],
+      createdAt: now, updatedAt: now,
     }));
     setData(prev => [...prev, ...newItems]);
-    // 가져온 파일 기록
     const updatedConn = { ...conn, importedFiles: conn.files.map(f => f.name) };
     persistFolderConnections(folderConnections.map(c => c.id === conn.id ? updatedConn : c));
     alert(`${newItems.length}건이 등록되었습니다.`); setShowFolderConnect(false);
@@ -1088,6 +1222,18 @@ export default function Designs() {
               <div className={folderConnections.length > 0 ? 'border-t border-gray-100 pt-4' : ''}>
                 <h3 className="text-sm font-semibold text-gray-700 mb-3">새 폴더 연결 추가</h3>
                 <div className="space-y-3">
+                  {/* 소스 유형 탭 */}
+                  <div className="flex rounded-lg border border-gray-200 overflow-hidden">
+                    <button onClick={() => { setFcSourceType('server'); setFcFiles([]); setFcSelected(new Set()); setFcTestError(''); }}
+                      className={`flex-1 py-2 text-sm font-medium transition-colors ${fcSourceType === 'server' ? 'bg-blue-600 text-white' : 'bg-white text-gray-500 hover:bg-gray-50'}`}>
+                      서버 경로
+                    </button>
+                    <button onClick={() => { setFcSourceType('browser'); setFcFiles([]); setFcSelected(new Set()); setFcTestError(''); }}
+                      className={`flex-1 py-2 text-sm font-medium transition-colors ${fcSourceType === 'browser' ? 'bg-blue-600 text-white' : 'bg-white text-gray-500 hover:bg-gray-50'}`}>
+                      브라우저 폴더
+                    </button>
+                  </div>
+
                   <div>
                     <label className="text-xs font-medium text-gray-500 mb-1 block">프로젝트 선택 *</label>
                     <select value={fcProjectId} onChange={e => { const p = projects.find(p => p.id === e.target.value); setFcProjectId(e.target.value); setFcProjectName(p?.name || ''); }}
@@ -1096,17 +1242,42 @@ export default function Designs() {
                       {projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
                     </select>
                   </div>
-                  <div>
-                    <label className="text-xs font-medium text-gray-500 mb-1 block">폴더 선택 *</label>
-                    <div className="flex gap-2">
-                      <input type="text" readOnly value={fcFolderPath} placeholder="폴더 선택 시 자동 입력"
-                        className="flex-1 border border-gray-200 rounded-lg px-3 py-2 text-sm bg-gray-50 text-gray-600" />
-                      <button onClick={() => folderRef.current?.click()} className="btn-secondary flex items-center gap-2 flex-shrink-0 text-sm">
-                        <FolderOpen size={15} />폴더 선택
-                      </button>
+
+                  {fcSourceType === 'server' ? (
+                    <div>
+                      <label className="text-xs font-medium text-gray-500 mb-1 block">서버 경로 *</label>
+                      <div className="flex gap-2">
+                        <input type="text" value={fcServerPath}
+                          onChange={e => { setFcServerPath(e.target.value); setFcFiles([]); setFcSelected(new Set()); setFcTestError(''); }}
+                          placeholder="예: C:\project\test\doc"
+                          className="flex-1 border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono" />
+                        <button onClick={testServerConnection} disabled={fcTestLoading || !fcServerPath.trim()}
+                          className="btn-secondary flex items-center gap-2 flex-shrink-0 text-sm disabled:opacity-50">
+                          {fcTestLoading ? <div className="animate-spin rounded-full h-3 w-3 border border-gray-500 border-t-transparent" /> : <FolderOpen size={14} />}
+                          {fcTestLoading ? '확인 중...' : '연결 테스트'}
+                        </button>
+                      </div>
+                      {fcTestError && (
+                        <div className="mt-2 p-2 bg-red-50 border border-red-200 rounded-lg text-xs text-red-600 whitespace-pre-line">{fcTestError}</div>
+                      )}
+                      <p className="text-xs text-gray-400 mt-1">
+                        ※ <code className="bg-gray-100 px-1 rounded">npm run dev:full</code> 로 앱 실행 시 서버 경로를 직접 읽습니다.
+                      </p>
                     </div>
-                    <p className="text-xs text-gray-400 mt-1">※ 대화상자에서 C:\project\doc 폴더로 이동하여 선택하세요.</p>
-                  </div>
+                  ) : (
+                    <div>
+                      <label className="text-xs font-medium text-gray-500 mb-1 block">폴더 선택 *</label>
+                      <div className="flex gap-2">
+                        <input type="text" readOnly value={fcFolderPath} placeholder="폴더 선택 시 자동 입력"
+                          className="flex-1 border border-gray-200 rounded-lg px-3 py-2 text-sm bg-gray-50 text-gray-600" />
+                        <button onClick={() => folderRef.current?.click()} className="btn-secondary flex items-center gap-2 flex-shrink-0 text-sm">
+                          <FolderOpen size={15} />폴더 선택
+                        </button>
+                      </div>
+                      <p className="text-xs text-gray-400 mt-1">※ 브라우저 대화상자에서 폴더를 선택하세요. 파일 내용은 직접 표시되지 않습니다.</p>
+                    </div>
+                  )}
+
                   {fcFiles.length > 0 && (
                     <div>
                       <div className="flex items-center justify-between mb-2">
@@ -1133,7 +1304,8 @@ export default function Designs() {
                     </div>
                   )}
                   <input ref={folderRef} type="file" webkitdirectory="" directory="" multiple className="hidden" onChange={handleFolderSelect} />
-                  <button onClick={saveFolderConnection} disabled={!fcProjectId || fcSelected.size === 0}
+                  <button onClick={saveFolderConnection}
+                    disabled={!fcProjectId || fcSelected.size === 0}
                     className="w-full btn-primary disabled:opacity-40 disabled:cursor-not-allowed">
                     {fcSelected.size > 0 ? `연결 저장 (${fcSelected.size}개 파일)` : '연결 저장'}
                   </button>

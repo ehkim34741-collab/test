@@ -7,7 +7,8 @@ export interface DesignVersion {
   version: string;       // v1.0, v1.1
   fileName: string;
   fileSize: string;
-  fileData?: string;     // base64
+  fileData?: string;     // base64 (브라우저 업로드)
+  serverDir?: string;    // 서버 경로 (서버 폴더 연결)
   uploadedAt: string;
   uploadedBy: string;
   note: string;
