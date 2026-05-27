@@ -1,4 +1,4 @@
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import * as XLSX from 'xlsx';
 import { Upload, FileSpreadsheet, X, BarChart2, CheckCircle, Clock, AlertCircle, PauseCircle } from 'lucide-react';
 
@@ -55,6 +55,19 @@ export default function Requirements() {
   const [search, setSearch] = useState('');
   const fileRef = useRef<HTMLInputElement>(null);
 
+  useEffect(() => {
+    const saved = localStorage.getItem('requirements-data');
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        setRows(parsed.rows || []);
+        setHeaders(parsed.headers || []);
+        setFileName(parsed.fileName || '');
+        setStats(parsed.stats || null);
+      } catch {}
+    }
+  }, []);
+
   // 열 이름 매핑
   const statusCol = detectColumn(headers, ['상태', 'status', '진행상태', '처리상태']);
   const priorityCol = detectColumn(headers, ['우선순위', 'priority', '중요도']);
@@ -99,7 +112,11 @@ export default function Requirements() {
         }
       });
 
-      setStats({ total: json.length, byStatus, byPriority, byCategory });
+      const newStats = { total: json.length, byStatus, byPriority, byCategory };
+      setStats(newStats);
+      localStorage.setItem('requirements-data', JSON.stringify({
+        rows: json, headers: hdrs, fileName: file.name, stats: newStats,
+      }));
     };
     reader.readAsArrayBuffer(file);
   }
@@ -126,6 +143,7 @@ export default function Requirements() {
     setStats(null);
     setSearch('');
     if (fileRef.current) fileRef.current.value = '';
+    localStorage.removeItem('requirements-data');
   }
 
   const filtered = rows.filter(row =>
