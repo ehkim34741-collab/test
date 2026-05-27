@@ -84,6 +84,15 @@ function detectDesignType(fileName: string): DesignType {
   return '요구사항 정의서';
 }
 
+function extractNameFromFile(fileName: string): string {
+  return fileName
+    .replace(/\.[^.]+$/, '')              // 확장자 제거
+    .replace(/_?v\d+[\._]\d+[^\s]*$/i, '') // 버전 접미사 제거 (_v1.0, _v1.1 등)
+    .replace(/[_-]/g, ' ')                 // 언더스코어/하이픈 → 공백
+    .replace(/\s+/g, ' ')                  // 연속 공백 정리
+    .trim();
+}
+
 function emptyForm(): Omit<Design, 'id' | 'versions' | 'createdAt' | 'updatedAt'> {
   return {
     name: '', type: '요구사항 정의서', projectId: '', projectName: '',
@@ -94,25 +103,92 @@ function emptyForm(): Omit<Design, 'id' | 'versions' | 'createdAt' | 'updatedAt'
 }
 
 // 파일 미리보기 컴포넌트
-function FilePreview({ ver }: { ver?: DesignVersion }) {
-  if (!ver) {
+function FilePreview({ design, ver }: { design: Design; ver?: DesignVersion }) {
+  // fileData가 있으면 파일 렌더링, 없으면 산출물 상세 정보 표시
+  if (!ver?.fileData) {
+    const ext = ver?.fileName.split('.').pop()?.toLowerCase();
+    const iconColor = ext === 'xlsx' || ext === 'xls' ? 'text-green-500'
+      : ext === 'pptx' || ext === 'ppt' ? 'text-orange-500'
+      : ext === 'docx' || ext === 'doc' ? 'text-blue-500' : 'text-gray-400';
+
     return (
-      <div className="flex flex-col items-center justify-center h-full text-gray-400">
-        <FileText size={48} className="mb-3 opacity-30" />
-        <p className="text-sm">첨부 파일이 없습니다</p>
-      </div>
-    );
-  }
-  if (!ver.fileData) {
-    return (
-      <div className="flex flex-col items-center justify-center h-full text-gray-400">
-        <FileText size={48} className="mb-3 opacity-30" />
-        <p className="text-sm font-medium text-gray-500 mb-1">{ver.fileName}</p>
-        <p className="text-xs text-gray-400">파일 데이터가 없습니다 (외부 경로 파일)</p>
+      <div className="h-full overflow-y-auto space-y-4">
+        {/* 산출물 헤더 */}
+        <div className="bg-gradient-to-br from-slate-50 to-blue-50 rounded-xl p-6">
+          <div className="flex items-center gap-2 mb-2 flex-wrap">
+            <span className="text-xs bg-white border border-gray-200 text-gray-600 px-2.5 py-0.5 rounded-full font-medium">{design.type}</span>
+            <span className={`text-xs px-2.5 py-0.5 rounded-full font-medium ${STATUS_STYLE[design.status]}`}>{design.status}</span>
+            <span className={`text-xs px-2.5 py-0.5 rounded-full font-medium ${CR_STYLE[design.customerReviewStatus]}`}>고객검토: {design.customerReviewStatus}</span>
+          </div>
+          <h2 className="text-xl font-bold text-gray-900 mt-3 mb-1">{design.name}</h2>
+          <p className="text-sm text-gray-500">{design.projectName} · {design.phase}단계</p>
+        </div>
+
+        {/* 상세 정보 그리드 */}
+        <div className="grid grid-cols-2 gap-3">
+          {[
+            { label: '담당자', value: design.manager || '—' },
+            { label: '고객 검토자', value: design.customerReviewer || '—' },
+            { label: '계획 시작일', value: design.plannedStart.replace(/-/g, '.') },
+            { label: '계획 종료일', value: design.plannedEnd.replace(/-/g, '.') },
+          ].map(item => (
+            <div key={item.label} className="bg-white rounded-xl border border-gray-100 p-4">
+              <div className="text-xs text-gray-400 mb-1">{item.label}</div>
+              <div className="text-sm font-semibold text-gray-800">{item.value}</div>
+            </div>
+          ))}
+        </div>
+
+        {/* 관련 요구사항 */}
+        {design.relatedRequirementIds.length > 0 && (
+          <div className="bg-white rounded-xl border border-gray-100 p-4">
+            <div className="text-xs font-semibold text-gray-500 mb-2">관련 요구사항</div>
+            <div className="flex flex-wrap gap-1.5">
+              {design.relatedRequirementIds.map(id => (
+                <span key={id} className="text-xs bg-blue-50 text-blue-600 px-2.5 py-1 rounded-full font-medium">{id}</span>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* 버전 이력 */}
+        <div className="bg-white rounded-xl border border-gray-100 p-4">
+          <div className="text-xs font-semibold text-gray-500 mb-3">버전 이력 ({design.versions.length}건)</div>
+          {design.versions.length === 0 ? (
+            <div className="text-center py-6 text-gray-400">
+              <Upload size={28} className="mx-auto mb-2 opacity-30" />
+              <p className="text-xs">수정 화면에서 파일을 첨부하면 여기에 표시됩니다.</p>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {[...design.versions].reverse().map(v => (
+                <div key={v.version} className="flex items-center gap-3 bg-gray-50 rounded-lg px-3 py-2.5">
+                  <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full font-mono font-bold w-12 text-center flex-shrink-0">{v.version}</span>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-1.5">
+                      <FileText size={12} className={iconColor} />
+                      <span className="text-sm font-medium text-gray-800 truncate">{v.fileName}</span>
+                    </div>
+                    <div className="text-xs text-gray-400 mt-0.5">{v.uploadedAt} · {v.uploadedBy} · {v.fileSize}{v.note && ` · ${v.note}`}</div>
+                  </div>
+                  {v.fileData ? (
+                    <a href={v.fileData} download={v.fileName}
+                      className="flex items-center gap-1 text-xs bg-blue-600 text-white px-2.5 py-1.5 rounded-lg hover:bg-blue-700 transition-colors flex-shrink-0">
+                      <Download size={11} />다운로드
+                    </a>
+                  ) : (
+                    <span className="text-xs text-gray-300 flex-shrink-0">파일 없음</span>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
       </div>
     );
   }
 
+  // fileData 있을 때 — 파일 종류별 렌더링
   const mimeType = ver.fileData.split(';')[0].replace('data:', '');
 
   if (mimeType === 'application/pdf') {
@@ -132,15 +208,13 @@ function FilePreview({ ver }: { ver?: DesignVersion }) {
     : ext === 'docx' || ext === 'doc' ? 'text-blue-500' : 'text-gray-400';
 
   return (
-    <div className="flex flex-col items-center justify-center h-full bg-gray-50 rounded-lg border border-gray-200">
+    <div className="flex flex-col items-center justify-center h-full bg-gray-50 rounded-xl border border-gray-200">
       <FileText size={56} className={`${iconColor} mb-4`} />
       <p className="text-sm font-semibold text-gray-700 mb-1">{ver.fileName}</p>
       <p className="text-xs text-gray-400 mb-6">{ver.fileSize} · {ver.version} · {ver.uploadedAt}</p>
-      <p className="text-xs text-gray-400 mb-4 text-center px-8">
-        Office 파일은 브라우저에서 직접 미리보기가 지원되지 않습니다.
-      </p>
+      <p className="text-xs text-gray-400 mb-4 text-center px-8">Office 파일은 브라우저 미리보기가 지원되지 않습니다.</p>
       <a href={ver.fileData} download={ver.fileName}
-        className="flex items-center gap-2 bg-blue-600 text-white text-sm px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors">
+        className="flex items-center gap-2 bg-blue-600 text-white text-sm px-5 py-2.5 rounded-xl hover:bg-blue-700 transition-colors font-medium">
         <Download size={15} />파일 다운로드
       </a>
     </div>
@@ -328,6 +402,10 @@ export default function Designs() {
   }
   function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]; if (!file) return;
+    // 신규 등록이고 산출물명이 비어 있으면 파일명에서 자동 추출
+    if (!editTarget && !form.name) {
+      setForm(f => ({ ...f, name: extractNameFromFile(file.name) }));
+    }
     const reader = new FileReader();
     reader.onload = ev => {
       const result = ev.target?.result as string;
@@ -454,7 +532,7 @@ export default function Designs() {
     const now = today();
     const newItems: Design[] = conn.files.map((file, i) => ({
       id: `D${String(data.length + i + 1).padStart(3, '0')}`,
-      name: file.name.replace(/\.[^.]+$/, ''), type: detectDesignType(file.name),
+      name: extractNameFromFile(file.name), type: detectDesignType(file.name),
       projectId: conn.projectId, projectName: conn.projectName,
       phase: '분석' as DesignPhase, manager: '', plannedStart: now, plannedEnd: now,
       status: '작성중' as DesignStatus, customerReviewer: '', customerReviewStatus: '검토전' as CustomerReviewStatus,
@@ -709,7 +787,7 @@ export default function Designs() {
 
               {/* 오른쪽: 파일 미리보기 */}
               <div className="flex-1 p-4 overflow-hidden">
-                <FilePreview ver={viewerVersion} />
+                <FilePreview design={viewerTarget!} ver={viewerVersion} />
               </div>
             </div>
           </div>
