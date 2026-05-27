@@ -1,74 +1,97 @@
-import {
-  PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
-  ResponsiveContainer, Legend
-} from 'recharts';
-import { TrendingUp, TrendingDown, FolderKanban, CheckSquare, AlertTriangle, DollarSign, Activity } from 'lucide-react';
-import { projects, activities, projectStatusData, monthlyBudget } from '../data/mockData';
-import StatusBadge from '../components/StatusBadge';
+import { useMemo } from 'react';
+import { AlertTriangle, CheckSquare, ShieldAlert, DollarSign, Calendar, TrendingUp, Clock, User } from 'lucide-react';
+import { projectConfig } from '../data/projectConfig';
+import { useAuth } from '../context/AuthContext';
 
-const totalBudget = projects.reduce((sum, p) => sum + p.budget, 0);
-const totalSpent = projects.reduce((sum, p) => sum + p.spent, 0);
+interface Issue { id: string; status: string; dueDate?: string; }
+interface Risk { id: string; probability: number; impact: number; status: string; }
+interface ActionItem { id: string; status: string; dueDate?: string; }
 
-function formatBudget(value: number) {
-  return `${(value / 100000000).toFixed(1)}억`;
+function loadJSON<T>(key: string): T[] {
+  try { const r = localStorage.getItem(key); return r ? JSON.parse(r) : []; } catch { return []; }
 }
 
-function formatDate(dateStr: string) {
-  const d = new Date(dateStr);
-  const now = new Date();
-  const diff = (now.getTime() - d.getTime()) / 1000 / 60;
-  if (diff < 60) return `${Math.floor(diff)}분 전`;
-  if (diff < 1440) return `${Math.floor(diff / 60)}시간 전`;
-  return `${Math.floor(diff / 1440)}일 전`;
+function formatMoney(v: number) {
+  return `${(v / 100_000_000).toFixed(1)}억원`;
 }
 
-const activityTypeConfig = {
-  project: { color: 'bg-blue-500', label: '프로젝트' },
-  task: { color: 'bg-green-500', label: '태스크' },
-  risk: { color: 'bg-red-500', label: '리스크' },
-  resource: { color: 'bg-purple-500', label: '리소스' },
-};
+function dDay(dateStr: string) {
+  const diff = Math.ceil((new Date(dateStr).getTime() - Date.now()) / 86400000);
+  if (diff < 0) return `D+${Math.abs(diff)}`;
+  if (diff === 0) return 'D-Day';
+  return `D-${diff}`;
+}
+
+function progressColor(pct: number) {
+  if (pct >= 80) return 'bg-green-500';
+  if (pct >= 50) return 'bg-blue-500';
+  if (pct >= 30) return 'bg-amber-500';
+  return 'bg-red-500';
+}
 
 export default function Dashboard() {
-  const onTrack = projects.filter(p => p.status === 'on-track').length;
-  const atRisk = projects.filter(p => p.status === 'at-risk').length;
-  const delayed = projects.filter(p => p.status === 'delayed').length;
-  const completed = projects.filter(p => p.status === 'completed').length;
-  const budgetUtilization = Math.round((totalSpent / totalBudget) * 100);
+  const { currentUser } = useAuth();
+
+  const issues = useMemo(() => loadJSON<Issue>('pmo-issues'), []);
+  const risks = useMemo(() => loadJSON<Risk>('pmo-risks'), []);
+  const actions = useMemo(() => loadJSON<ActionItem>('pmo-action-items'), []);
+
+  const today = new Date().toISOString().slice(0, 10);
+
+  const issueOpen = issues.filter(i => i.status !== '해결' && i.status !== '닫힘').length;
+  const issueOverdue = issues.filter(i => i.dueDate && i.dueDate < today && i.status !== '해결' && i.status !== '닫힘').length;
+  const riskHigh = risks.filter(r => r.probability * r.impact >= 6).length;
+  const riskOpen = risks.filter(r => r.status !== '완료' && r.status !== '수용').length;
+  const actionPending = actions.filter(a => a.status !== '완료' && a.status !== '취소').length;
+  const actionOverdue = actions.filter(a => a.dueDate && a.dueDate < today && a.status !== '완료' && a.status !== '취소').length;
+
+  const startDate = new Date(projectConfig.startDate);
+  const endDate = new Date(projectConfig.endDate);
+  const now = Date.now();
+  const totalDays = (endDate.getTime() - startDate.getTime()) / 86400000;
+  const elapsedDays = Math.max(0, (now - startDate.getTime()) / 86400000);
+  const scheduleProgress = Math.min(100, Math.round((elapsedDays / totalDays) * 100));
+  const budgetRate = Math.round((projectConfig.spent / projectConfig.budget) * 100);
+  const remainingBudget = projectConfig.budget - projectConfig.spent;
+  const endDDay = dDay(projectConfig.endDate);
 
   const kpis = [
     {
-      label: '전체 프로젝트',
-      value: projects.length,
-      unit: '개',
-      change: 2,
-      icon: FolderKanban,
-      color: 'text-blue-600',
-      bg: 'bg-blue-50',
-    },
-    {
-      label: '정상 프로젝트',
-      value: onTrack,
-      unit: '개',
-      change: 1,
-      icon: TrendingUp,
-      color: 'text-green-600',
-      bg: 'bg-green-50',
-    },
-    {
-      label: '위험/지연 프로젝트',
-      value: atRisk + delayed,
-      unit: '개',
-      change: -1,
+      label: '미처리 이슈',
+      value: issueOpen,
+      unit: '건',
+      sub: issueOverdue > 0 ? `기한초과 ${issueOverdue}건` : '기한초과 없음',
+      subColor: issueOverdue > 0 ? 'text-red-500' : 'text-green-500',
       icon: AlertTriangle,
       color: 'text-red-600',
       bg: 'bg-red-50',
     },
     {
+      label: '미완료 위험',
+      value: riskOpen,
+      unit: '건',
+      sub: riskHigh > 0 ? `고위험 ${riskHigh}건` : '고위험 없음',
+      subColor: riskHigh > 0 ? 'text-red-500' : 'text-green-500',
+      icon: ShieldAlert,
+      color: 'text-orange-600',
+      bg: 'bg-orange-50',
+    },
+    {
+      label: '미완료 액션',
+      value: actionPending,
+      unit: '건',
+      sub: actionOverdue > 0 ? `기한초과 ${actionOverdue}건` : '기한초과 없음',
+      subColor: actionOverdue > 0 ? 'text-red-500' : 'text-green-500',
+      icon: CheckSquare,
+      color: 'text-blue-600',
+      bg: 'bg-blue-50',
+    },
+    {
       label: '예산 집행률',
-      value: budgetUtilization,
+      value: budgetRate,
       unit: '%',
-      change: 3,
+      sub: `잔여 ${formatMoney(remainingBudget)}`,
+      subColor: 'text-gray-500',
       icon: DollarSign,
       color: 'text-purple-600',
       bg: 'bg-purple-50',
@@ -77,154 +100,151 @@ export default function Dashboard() {
 
   return (
     <div className="p-8">
-      <div className="mb-8">
+      <div className="mb-6">
         <h1 className="text-2xl font-bold text-gray-900">PMO 대시보드</h1>
-        <p className="text-gray-500 mt-1">2026년 5월 26일 기준 프로젝트 현황</p>
+        <p className="text-gray-500 mt-1">
+          {projectConfig.name} &nbsp;·&nbsp; {today.replace(/-/g, '.')} 기준
+          {currentUser && <span className="ml-2 text-blue-600 font-medium">· {currentUser.displayName} ({currentUser.role})</span>}
+        </p>
+      </div>
+
+      {/* Project Info Card */}
+      <div className="bg-gradient-to-r from-slate-800 to-blue-900 rounded-2xl p-6 mb-8 text-white">
+        <div className="flex flex-col md:flex-row md:items-center gap-4 justify-between">
+          <div>
+            <div className="flex items-center gap-3 mb-2">
+              <span className="bg-blue-500 text-white text-xs font-bold px-2 py-0.5 rounded">{projectConfig.code}</span>
+              <span className="bg-white/20 text-white text-xs px-2 py-0.5 rounded">{projectConfig.phase} 단계</span>
+            </div>
+            <h2 className="text-xl font-bold mb-1">{projectConfig.name}</h2>
+            <p className="text-slate-300 text-sm">{projectConfig.description}</p>
+          </div>
+          <div className="flex gap-6 flex-shrink-0 text-sm">
+            <div className="text-center">
+              <div className="text-slate-300 text-xs mb-1 flex items-center gap-1"><User size={11} /> 발주처</div>
+              <div className="font-semibold">{projectConfig.client}</div>
+            </div>
+            <div className="text-center">
+              <div className="text-slate-300 text-xs mb-1 flex items-center gap-1"><User size={11} /> PM</div>
+              <div className="font-semibold">{projectConfig.pm}</div>
+            </div>
+            <div className="text-center">
+              <div className="text-slate-300 text-xs mb-1 flex items-center gap-1"><Calendar size={11} /> 종료일</div>
+              <div className="font-semibold">{projectConfig.endDate.replace(/-/g, '.')}</div>
+              <div className="text-xs text-amber-300 font-bold">{endDDay}</div>
+            </div>
+          </div>
+        </div>
+
+        {/* Progress bars */}
+        <div className="mt-5 grid grid-cols-2 gap-6">
+          <div>
+            <div className="flex justify-between text-xs text-slate-300 mb-1.5">
+              <span className="flex items-center gap-1"><TrendingUp size={12} /> 일정 진행률</span>
+              <span className="font-semibold text-white">{scheduleProgress}%</span>
+            </div>
+            <div className="h-2 bg-white/20 rounded-full overflow-hidden">
+              <div className={`h-full rounded-full transition-all ${progressColor(scheduleProgress)}`} style={{ width: `${scheduleProgress}%` }} />
+            </div>
+            <div className="flex justify-between text-xs text-slate-400 mt-1">
+              <span>{projectConfig.startDate.replace(/-/g, '.')}</span>
+              <span>{projectConfig.endDate.replace(/-/g, '.')}</span>
+            </div>
+          </div>
+          <div>
+            <div className="flex justify-between text-xs text-slate-300 mb-1.5">
+              <span className="flex items-center gap-1"><DollarSign size={12} /> 예산 집행률</span>
+              <span className="font-semibold text-white">{budgetRate}%</span>
+            </div>
+            <div className="h-2 bg-white/20 rounded-full overflow-hidden">
+              <div className={`h-full rounded-full transition-all ${progressColor(budgetRate)}`} style={{ width: `${budgetRate}%` }} />
+            </div>
+            <div className="flex justify-between text-xs text-slate-400 mt-1">
+              <span>집행 {formatMoney(projectConfig.spent)}</span>
+              <span>총 {formatMoney(projectConfig.budget)}</span>
+            </div>
+          </div>
+        </div>
       </div>
 
       {/* KPI Cards */}
-      <div className="grid grid-cols-4 gap-6 mb-8">
-        {kpis.map((kpi) => {
+      <div className="grid grid-cols-4 gap-4 mb-8">
+        {kpis.map(kpi => {
           const Icon = kpi.icon;
           return (
-            <div key={kpi.label} className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
-              <div className="flex items-center justify-between mb-4">
+            <div key={kpi.label} className="bg-white rounded-xl shadow-sm border border-gray-100 p-5">
+              <div className="flex items-center justify-between mb-3">
                 <div className={`w-10 h-10 ${kpi.bg} rounded-lg flex items-center justify-center`}>
                   <Icon size={20} className={kpi.color} />
                 </div>
-                <div className={`flex items-center gap-1 text-xs font-medium ${kpi.change > 0 ? 'text-green-600' : 'text-red-600'}`}>
-                  {kpi.change > 0 ? <TrendingUp size={12} /> : <TrendingDown size={12} />}
-                  {Math.abs(kpi.change)}{kpi.unit}
-                </div>
               </div>
               <div className="text-3xl font-bold text-gray-900">
-                {kpi.value}<span className="text-lg text-gray-400 ml-1">{kpi.unit}</span>
+                {kpi.value}<span className="text-base text-gray-400 ml-1">{kpi.unit}</span>
               </div>
-              <div className="text-sm text-gray-500 mt-1">{kpi.label}</div>
+              <div className="text-sm text-gray-500 mt-0.5">{kpi.label}</div>
+              <div className={`text-xs mt-1 font-medium ${kpi.subColor}`}>{kpi.sub}</div>
             </div>
           );
         })}
       </div>
 
-      <div className="grid grid-cols-3 gap-6 mb-6">
-        {/* Status Chart */}
-        <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
-          <h2 className="text-base font-semibold text-gray-900 mb-4">프로젝트 상태 현황</h2>
-          <ResponsiveContainer width="100%" height={200}>
-            <PieChart>
-              <Pie
-                data={projectStatusData}
-                cx="50%"
-                cy="50%"
-                innerRadius={55}
-                outerRadius={80}
-                paddingAngle={3}
-                dataKey="value"
-              >
-                {projectStatusData.map((entry, index) => (
-                  <Cell key={index} fill={entry.color} />
-                ))}
-              </Pie>
-              <Tooltip formatter={(value) => [`${value}개`, '']} />
-            </PieChart>
-          </ResponsiveContainer>
-          <div className="grid grid-cols-2 gap-2 mt-2">
-            {projectStatusData.map((item) => (
-              <div key={item.name} className="flex items-center gap-2 text-xs">
-                <div className="w-3 h-3 rounded-full flex-shrink-0" style={{ backgroundColor: item.color }} />
-                <span className="text-gray-600">{item.name}</span>
-                <span className="font-semibold ml-auto">{item.value}개</span>
-              </div>
-            ))}
-          </div>
-          <div className="mt-3 pt-3 border-t border-gray-100 text-xs text-gray-500 text-center">
-            완료율 {Math.round((completed / projects.length) * 100)}%
-          </div>
-        </div>
-
-        {/* Budget Chart */}
-        <div className="col-span-2 bg-white rounded-xl shadow-sm border border-gray-100 p-6">
-          <h2 className="text-base font-semibold text-gray-900 mb-4">월별 예산 집행 현황 (단위: 백만원)</h2>
-          <ResponsiveContainer width="100%" height={230}>
-            <BarChart data={monthlyBudget} barSize={12}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
-              <XAxis dataKey="month" tick={{ fontSize: 12 }} />
-              <YAxis tick={{ fontSize: 12 }} />
-              <Tooltip
-                formatter={(value, name) => [
-                  `${value}백만원`,
-                  name === 'planned' ? '계획' : '실적'
-                ]}
-              />
-              <Legend formatter={(value) => value === 'planned' ? '계획' : '실적'} />
-              <Bar dataKey="planned" fill="#93c5fd" name="planned" radius={[4, 4, 0, 0]} />
-              <Bar dataKey="actual" fill="#3b82f6" name="actual" radius={[4, 4, 0, 0]} />
-            </BarChart>
-          </ResponsiveContainer>
-        </div>
-      </div>
-
+      {/* Status Summary */}
       <div className="grid grid-cols-3 gap-6">
-        {/* Project List Summary */}
-        <div className="col-span-2 bg-white rounded-xl shadow-sm border border-gray-100 p-6">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-base font-semibold text-gray-900">주요 프로젝트 현황</h2>
-            <a href="/projects" className="text-sm text-blue-600 hover:underline">전체보기 →</a>
-          </div>
-          <div className="space-y-4">
-            {projects.slice(0, 5).map((project) => (
-              <div key={project.id} className="flex items-center gap-4">
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2 mb-1">
-                    <span className="text-sm font-medium text-gray-900 truncate">{project.name}</span>
-                    <StatusBadge status={project.status} type="project" />
-                  </div>
-                  <div className="flex items-center gap-3">
-                    <div className="flex-1 bg-gray-100 rounded-full h-1.5">
-                      <div
-                        className="h-1.5 rounded-full"
-                        style={{
-                          width: `${project.progress}%`,
-                          backgroundColor:
-                            project.status === 'on-track' ? '#22c55e' :
-                            project.status === 'completed' ? '#3b82f6' :
-                            project.status === 'at-risk' ? '#f59e0b' : '#ef4444'
-                        }}
-                      />
-                    </div>
-                    <span className="text-xs text-gray-500 w-8 text-right">{project.progress}%</span>
-                  </div>
-                </div>
-                <div className="text-right text-xs text-gray-500 w-24 flex-shrink-0">
-                  <div>{formatBudget(project.spent)} / {formatBudget(project.budget)}</div>
-                  <div className="text-gray-400">{project.manager}</div>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        {/* Recent Activities */}
+        {/* Issue summary */}
         <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
           <div className="flex items-center gap-2 mb-4">
-            <Activity size={16} className="text-gray-500" />
-            <h2 className="text-base font-semibold text-gray-900">최근 활동</h2>
+            <AlertTriangle size={16} className="text-red-500" />
+            <h2 className="text-base font-semibold text-gray-900">이슈 현황</h2>
           </div>
-          <div className="space-y-4">
-            {activities.map((activity) => {
-              const typeConf = activityTypeConfig[activity.type];
-              return (
-                <div key={activity.id} className="flex gap-3">
-                  <div className={`w-2 h-2 rounded-full mt-1.5 flex-shrink-0 ${typeConf.color}`} />
-                  <div className="flex-1 min-w-0">
-                    <div className="text-xs font-medium text-gray-800">{activity.action}</div>
-                    <div className="text-xs text-gray-500 truncate">{activity.target}</div>
-                    <div className="text-xs text-gray-400 mt-0.5">{activity.user} · {formatDate(activity.timestamp)}</div>
-                  </div>
-                </div>
-              );
-            })}
+          {[
+            { label: '전체', value: issues.length, color: 'bg-gray-100 text-gray-700' },
+            { label: '미처리', value: issueOpen, color: 'bg-red-100 text-red-700' },
+            { label: '해결완료', value: issues.filter(i => i.status === '해결').length, color: 'bg-green-100 text-green-700' },
+            { label: '기한초과', value: issueOverdue, color: 'bg-rose-100 text-rose-700' },
+          ].map(row => (
+            <div key={row.label} className="flex items-center justify-between py-2 border-b border-gray-50 last:border-0">
+              <span className="text-sm text-gray-600">{row.label}</span>
+              <span className={`text-sm font-bold px-2 py-0.5 rounded-full ${row.color}`}>{row.value}</span>
+            </div>
+          ))}
+        </div>
+
+        {/* Risk summary */}
+        <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
+          <div className="flex items-center gap-2 mb-4">
+            <ShieldAlert size={16} className="text-orange-500" />
+            <h2 className="text-base font-semibold text-gray-900">위험 현황</h2>
           </div>
+          {[
+            { label: '전체', value: risks.length, color: 'bg-gray-100 text-gray-700' },
+            { label: '고위험', value: riskHigh, color: 'bg-red-100 text-red-700' },
+            { label: '중위험', value: risks.filter(r => { const s = r.probability * r.impact; return s >= 3 && s < 6; }).length, color: 'bg-amber-100 text-amber-700' },
+            { label: '미완료', value: riskOpen, color: 'bg-orange-100 text-orange-700' },
+          ].map(row => (
+            <div key={row.label} className="flex items-center justify-between py-2 border-b border-gray-50 last:border-0">
+              <span className="text-sm text-gray-600">{row.label}</span>
+              <span className={`text-sm font-bold px-2 py-0.5 rounded-full ${row.color}`}>{row.value}</span>
+            </div>
+          ))}
+        </div>
+
+        {/* Action summary */}
+        <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
+          <div className="flex items-center gap-2 mb-4">
+            <Clock size={16} className="text-blue-500" />
+            <h2 className="text-base font-semibold text-gray-900">액션아이템 현황</h2>
+          </div>
+          {[
+            { label: '전체', value: actions.length, color: 'bg-gray-100 text-gray-700' },
+            { label: '미완료', value: actionPending, color: 'bg-blue-100 text-blue-700' },
+            { label: '완료', value: actions.filter(a => a.status === '완료').length, color: 'bg-green-100 text-green-700' },
+            { label: '기한초과', value: actionOverdue, color: 'bg-rose-100 text-rose-700' },
+          ].map(row => (
+            <div key={row.label} className="flex items-center justify-between py-2 border-b border-gray-50 last:border-0">
+              <span className="text-sm text-gray-600">{row.label}</span>
+              <span className={`text-sm font-bold px-2 py-0.5 rounded-full ${row.color}`}>{row.value}</span>
+            </div>
+          ))}
         </div>
       </div>
     </div>
