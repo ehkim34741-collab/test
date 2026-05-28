@@ -9,6 +9,7 @@ import ActionItems from './pages/ActionItems';
 import Requirements from './pages/Requirements';
 import Designs from './pages/Designs';
 import AgentTeam from './pages/AgentTeam';
+import KnowledgeChat from './pages/KnowledgeChat';
 
 function AuthGate({ children }: { children: React.ReactNode }) {
   const { currentUser } = useAuth();
@@ -29,6 +30,7 @@ export default function App() {
             <Route path="requirements" element={<Requirements />} />
             <Route path="designs" element={<Designs />} />
             <Route path="agent-team" element={<AgentTeam />} />
+            <Route path="knowledge" element={<KnowledgeChat />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Route>
         </Routes>

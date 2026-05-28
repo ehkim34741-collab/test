@@ -9,6 +9,7 @@ import {
   Bot,
   Building2,
   LogOut,
+  MessageSquare,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { projectConfig } from '../data/projectConfig';
@@ -21,6 +22,7 @@ const navItems = [
   { path: '/requirements', label: '요구사항', icon: ClipboardList },
   { path: '/designs', label: '설계산출물', icon: Layers },
   { path: '/agent-team', label: '에이전트 팀', icon: Bot },
+  { path: '/knowledge', label: '프로젝트 챗봇', icon: MessageSquare },
 ];
 
 export default function Sidebar() {
