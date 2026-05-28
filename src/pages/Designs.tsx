@@ -9,6 +9,7 @@ import {
 } from 'lucide-react';
 import { designs as initialDesigns } from '../data/designData';
 import { projects } from '../data/mockData';
+import { parseFilenameMetadata } from '../utils/filenameParser';
 import type {
   Design, DesignStatus, CustomerReviewStatus, DesignType, DesignPhase, DesignVersion,
 } from '../types/design';
@@ -777,9 +778,11 @@ export default function Designs() {
 
   function importFromFolderConnection(conn: FolderConnection) {
     const now = today();
-    const newItems: Design[] = conn.files.map((file, i) => ({
+    const newItems: Design[] = conn.files.map((file, i) => {
+      const meta = parseFilenameMetadata(file.name);
+      return {
       id: `D${String(data.length + i + 1).padStart(3, '0')}`,
-      name: extractNameFromFile(file.name), type: detectDesignType(file.name),
+      name: meta.designName || extractNameFromFile(file.name), type: detectDesignType(file.name),
       projectId: conn.projectId, projectName: conn.projectName,
       phase: '분석' as DesignPhase, manager: '', plannedStart: now, plannedEnd: now,
       status: '작성중' as DesignStatus, customerReviewer: '', customerReviewStatus: '검토전' as CustomerReviewStatus,
@@ -789,7 +792,8 @@ export default function Designs() {
         serverDir: conn.folderPath, uploadedAt: now, uploadedBy: '(서버)', note: '서버 폴더 연결',
       }] : [],
       createdAt: now, updatedAt: now,
-    }));
+      };
+    });
     persistData([...data, ...newItems]);
     const updatedConn = { ...conn, importedFiles: conn.files.map(f => f.name) };
     persistFolderConnections(folderConnections.map(c => c.id === conn.id ? updatedConn : c));
@@ -1297,16 +1301,28 @@ export default function Designs() {
                         </div>
                       </div>
                       <div className="max-h-48 overflow-y-auto border border-gray-200 rounded-lg divide-y divide-gray-100">
-                        {fcFiles.map(file => (
-                          <label key={file.name} className="flex items-center gap-3 px-3 py-2 hover:bg-gray-50 cursor-pointer">
-                            <input type="checkbox" checked={fcSelected.has(file.name)}
-                              onChange={e => { const next = new Set(fcSelected); e.target.checked ? next.add(file.name) : next.delete(file.name); setFcSelected(next); }}
-                              className="w-4 h-4 text-blue-600 rounded" />
-                            <span className="flex-1 text-sm text-gray-700 truncate">{file.name}</span>
-                            <span className="text-xs text-gray-400 flex-shrink-0 mr-2">{detectDesignType(file.name)}</span>
-                            <span className="text-xs text-gray-400 flex-shrink-0">{file.size}</span>
-                          </label>
-                        ))}
+                        {fcFiles.map(file => {
+                          const meta = parseFilenameMetadata(file.name);
+                          const hasMeta = meta.alias || meta.designName || meta.designId;
+                          return (
+                            <label key={file.name} className="flex items-start gap-3 px-3 py-2 hover:bg-gray-50 cursor-pointer">
+                              <input type="checkbox" checked={fcSelected.has(file.name)}
+                                onChange={e => { const next = new Set(fcSelected); e.target.checked ? next.add(file.name) : next.delete(file.name); setFcSelected(next); }}
+                                className="w-4 h-4 text-blue-600 rounded mt-0.5" />
+                              <div className="flex-1 min-w-0">
+                                <span className="text-sm text-gray-700 truncate block">{file.name}</span>
+                                {hasMeta && (
+                                  <div className="flex flex-wrap gap-1 mt-0.5">
+                                    {meta.alias && <span className="text-xs bg-blue-50 text-blue-600 px-1.5 py-0.5 rounded">업무: {meta.alias}</span>}
+                                    {meta.designName && <span className="text-xs bg-green-50 text-green-700 px-1.5 py-0.5 rounded">{meta.designName}</span>}
+                                    {meta.designId && <span className="text-xs bg-purple-50 text-purple-700 px-1.5 py-0.5 rounded font-mono">{meta.designId}</span>}
+                                  </div>
+                                )}
+                              </div>
+                              <span className="text-xs text-gray-400 flex-shrink-0 mt-0.5">{file.size}</span>
+                            </label>
+                          );
+                        })}
                       </div>
                       <div className="text-xs text-gray-400 mt-1 text-right">{fcSelected.size}개 선택됨</div>
                     </div>
